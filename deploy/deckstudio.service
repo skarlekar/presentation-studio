@@ -1,0 +1,41 @@
+[Unit]
+Description=DeckStudio Backend (FastAPI/uvicorn)
+Documentation=https://github.com/skarlekar/presentation-studio
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=deckstudio
+Group=deckstudio
+WorkingDirectory=/opt/deckstudio/backend
+EnvironmentFile=/opt/deckstudio/backend/.env
+
+ExecStart=/opt/deckstudio/venv/bin/uvicorn main:app \
+    --host 127.0.0.1 \
+    --port 8001 \
+    --workers 1 \
+    --log-level info \
+    --access-log
+
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/deckstudio/data /opt/deckstudio/backend
+
+# Allow writing to data dirs
+StateDirectory=deckstudio
+RuntimeDirectory=deckstudio
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=deckstudio
+
+[Install]
+WantedBy=multi-user.target
