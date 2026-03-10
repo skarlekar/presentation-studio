@@ -1,12 +1,20 @@
 """
-DeckStudio — FastAPI application entry point.
+DeckStudio FastAPI application entry point.
 
 Startup sequence:
-1. Validate Presentation Architect Prompt file exists (fail-fast)
-2. Start hourly session cleanup background task
-3. Mount CORS middleware and API routers
+  1. Load and validate settings (fail-fast on missing API keys)
+  2. Validate the Presentation Architect Prompt is present
+  3. Start the session cleanup background task (runs every hour)
+  4. Register CORS middleware and API routers
+
+Run directly:
+    python -m backend.main
+
+Or via uvicorn:
+    uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 """
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -18,44 +26,44 @@ from backend.services.session_service import get_session_service
 
 settings = get_settings()
 
+logging.basicConfig(
+    level=settings.log_level,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan — startup and shutdown events."""
+    """Application startup and shutdown lifecycle manager."""
     # ── Startup ──────────────────────────────────────────────────────────────
-    print(f"[DeckStudio] Starting on {settings.app_host}:{settings.app_port}")
-    print(f"[DeckStudio] Environment: {settings.app_env}")
-    print(f"[DeckStudio] Model: {settings.deepagents_model}")
+    logger.info("DeckStudio backend starting on %s:%d", settings.app_host, settings.app_port)
+    logger.info("Model: %s", settings.deepagents_model)
+    logger.info("Environment: %s", settings.app_env)
 
-    # Fail-fast: ensure the canonical Presentation Architect Prompt is present
+    # Fail-fast: validate the Presentation Architect Prompt is loadable
     try:
         from backend.prompts import PRESENTATION_ARCHITECT_PROMPT
-        print(
-            f"[DeckStudio] Presentation Architect Prompt loaded "
-            f"({len(PRESENTATION_ARCHITECT_PROMPT):,} chars)"
+
+        logger.info(
+            "Presentation Architect Prompt loaded: %d chars",
+            len(PRESENTATION_ARCHITECT_PROMPT),
         )
-    except FileNotFoundError as e:
-        # This will prevent the app from starting — by design
-        raise RuntimeError(
-            "CRITICAL: Presentation Architect Prompt file is missing. "
-            "The application cannot start without it. "
-            f"Expected at: backend/prompts/presentation_architect.txt\n{e}"
-        ) from e
+    except FileNotFoundError as exc:
+        logger.critical("STARTUP FAILED: %s", exc)
+        raise
 
-    # Hourly session cleanup task
-    async def _cleanup_loop() -> None:
+    # Start periodic session cleanup background task
+    async def cleanup_loop() -> None:
         while True:
-            await asyncio.sleep(3600)
-            try:
-                svc = get_session_service()
-                count = await svc.cleanup_expired()
-                if count:
-                    print(f"[DeckStudio] Cleaned up {count} expired session(s)")
-            except Exception as exc:
-                print(f"[DeckStudio] Session cleanup error: {exc}")
+            await asyncio.sleep(3600)  # Every hour
+            svc = get_session_service()
+            count = await svc.cleanup_expired()
+            if count:
+                logger.info("Cleaned up %d expired sessions", count)
 
-    cleanup_task = asyncio.create_task(_cleanup_loop())
-    print("[DeckStudio] Session cleanup task started (runs hourly)")
+    cleanup_task = asyncio.create_task(cleanup_loop())
+    logger.info("Session cleanup task started (TTL=%d min)", settings.session_ttl_minutes)
 
     yield
 
@@ -65,24 +73,27 @@ async def lifespan(app: FastAPI):
         await cleanup_task
     except asyncio.CancelledError:
         pass
-    print("[DeckStudio] Backend shut down cleanly")
+    logger.info("DeckStudio backend shut down cleanly")
 
 
-# ── Application ───────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Application instance
+# ─────────────────────────────────────────────────────────────────────────────
 
 app = FastAPI(
     title="DeckStudio API",
     description=(
-        "AI-powered executive presentation deck generator. "
-        "Uses a 5-agent DeepAgents pipeline with human-in-the-loop checkpoints "
-        "to produce McKinsey/BCG-style slide decks from context and source material."
+        "AI-powered presentation deck generator powered by a DeepAgents pipeline "
+        "with human-in-the-loop (HITL) checkpoints at every stage."
     ),
     version="1.0.0",
-    docs_url="/api/docs",
-    redoc_url="/api/redoc",
-    openapi_url="/api/openapi.json",
     lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
 )
+
+# ── CORS middleware ───────────────────────────────────────────────────────────
 
 app.add_middleware(
     CORSMiddleware,
@@ -92,18 +103,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Routers ───────────────────────────────────────────────────────────────────
+
 app.include_router(health.router, prefix="/api")
 app.include_router(deck.router, prefix="/api/deck", tags=["deck"])
 
 
-# ── Dev entry point ───────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Direct entry point
+# ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "backend.main:app",
         host=settings.app_host,
         port=settings.app_port,
-        reload=(settings.app_env == "development"),
+        reload=settings.app_env == "development",
         log_level=settings.app_log_level,
     )

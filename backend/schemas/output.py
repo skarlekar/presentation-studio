@@ -739,13 +739,29 @@ class Violation(BaseModel):
     )
 
     rule: str = Field(
-        ...,
+        default="",
         description="Human-readable description of the rule that was violated.",
+    )
+
+    # Alias used internally by quality_validator (maps to rule)
+    constraint: str = Field(
+        default="",
+        description="Machine-readable constraint name (e.g. 'max_5', 'exactly_1_sentence').",
+    )
+
+    message: str = Field(
+        default="",
+        description="Full human-readable violation message.",
     )
 
     severity: ViolationSeverity = Field(
         default=ViolationSeverity.ERROR,
         description="Severity: error (blocks output) | warning (flags for review) | info.",
+    )
+
+    actual_value: str = Field(
+        default="",
+        description="The actual value that caused the violation.",
     )
 
     value_preview: str | None = Field(
@@ -763,14 +779,32 @@ class ValidationReport(BaseModel):
     before it is returned to the client.
     """
 
-    session_id: str = Field(..., description="Source session identifier.")
+    session_id: str = Field(default="", description="Source session identifier.")
 
     passed: bool = Field(
-        ...,
+        default=True,
         description="True when no ERROR-severity violations were found.",
     )
 
-    total_slides_checked: int = Field(..., ge=0)
+    # Alias used by quality_validator.py
+    valid: bool = Field(
+        default=True,
+        description="Alias for passed — True when no violations found.",
+    )
+
+    total_slides_checked: int = Field(default=0, ge=0)
+
+    # Alias used by quality_validator.py
+    slides_checked: int = Field(
+        default=0,
+        description="Alias for total_slides_checked.",
+    )
+
+    # Alias used by quality_validator.py
+    checked_at: Any = Field(
+        default=None,
+        description="ISO timestamp or datetime of validation (optional).",
+    )
 
     violations: list[Violation] = Field(
         default_factory=list,
@@ -796,4 +830,9 @@ class ValidationReport(BaseModel):
             1 for v in self.violations if v.severity == ViolationSeverity.WARNING
         )
         self.passed = self.errors == 0
+        self.valid = self.passed
+        if self.slides_checked and not self.total_slides_checked:
+            self.total_slides_checked = self.slides_checked
+        elif self.total_slides_checked and not self.slides_checked:
+            self.slides_checked = self.total_slides_checked
         return self

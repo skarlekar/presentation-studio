@@ -1,0 +1,251 @@
+/**
+ * Global Zustand store for DeckStudio.
+ *
+ * Single store split into logical slices:
+ * - sessionSlice: pipeline session state
+ * - deckSlice: generated deck + slide selection
+ * - uiSlice: tab navigation, modals, display toggles
+ */
+
+import { create } from 'zustand'
+import type {
+  DeckRequest,
+  DeckEnvelope,
+  SessionStatusResponse,
+  Checkpoint,
+  PipelineStatus,
+  Slide,
+  Tab,
+} from '@/types'
+
+// ─────────────────────────────────────────────────────────────────────────────
+// State shape
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface SessionSlice {
+  sessionId: string | null
+  status: PipelineStatus | null
+  currentStage: string | null
+  progressPct: number
+  checkpoint: Checkpoint | null
+  error: string | null
+  isPolling: boolean
+  lastRequest: DeckRequest | null
+}
+
+interface DeckSlice {
+  envelope: DeckEnvelope | null
+  selectedSlideId: string | null
+  editingSlideId: string | null
+}
+
+interface UiSlice {
+  activeTab: Tab
+  showSpeakerNotes: boolean
+  showAppendix: boolean
+  checkpointModalOpen: boolean
+  exportResult: {
+    filename: string
+    version: number
+    saved_at: string
+    size_bytes: number
+  } | null
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Actions
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface Actions {
+  // Session
+  startSession: (sessionId: string, request: DeckRequest) => void
+  updateFromStatus: (status: SessionStatusResponse) => void
+  setPolling: (polling: boolean) => void
+  setEnvelope: (envelope: DeckEnvelope) => void
+  resetSession: () => void
+
+  // Deck / slide editing
+  selectSlide: (slideId: string | null) => void
+  setEditingSlide: (slideId: string | null) => void
+  updateSlideInStore: (updatedSlide: Slide) => void
+
+  // UI
+  setTab: (tab: Tab) => void
+  toggleSpeakerNotes: () => void
+  toggleAppendix: () => void
+  openCheckpointModal: () => void
+  closeCheckpointModal: () => void
+  setExportResult: (result: UiSlice['exportResult']) => void
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Store
+// ─────────────────────────────────────────────────────────────────────────────
+
+const initialSessionSlice: SessionSlice = {
+  sessionId: null,
+  status: null,
+  currentStage: null,
+  progressPct: 0,
+  checkpoint: null,
+  error: null,
+  isPolling: false,
+  lastRequest: null,
+}
+
+const initialDeckSlice: DeckSlice = {
+  envelope: null,
+  selectedSlideId: null,
+  editingSlideId: null,
+}
+
+const initialUiSlice: UiSlice = {
+  activeTab: 'intake',
+  showSpeakerNotes: false,
+  showAppendix: false,
+  checkpointModalOpen: false,
+  exportResult: null,
+}
+
+export const useStore = create<SessionSlice & DeckSlice & UiSlice & Actions>((set, get) => ({
+  // ── Initial state ──────────────────────────────────────────────────────────
+  ...initialSessionSlice,
+  ...initialDeckSlice,
+  ...initialUiSlice,
+
+  // ── Session actions ────────────────────────────────────────────────────────
+
+  startSession: (sessionId, request) =>
+    set({
+      sessionId,
+      status: 'pending',
+      currentStage: null,
+      progressPct: 0,
+      checkpoint: null,
+      error: null,
+      isPolling: true,
+      lastRequest: request,
+      envelope: null,
+      selectedSlideId: null,
+      editingSlideId: null,
+      exportResult: null,
+      activeTab: 'intake',
+    }),
+
+  updateFromStatus: (statusResp) => {
+    const checkpoint = statusResp.checkpoint ?? statusResp.active_checkpoint ?? null
+    const shouldOpenModal =
+      statusResp.status === 'awaiting_approval' &&
+      checkpoint !== null &&
+      !get().checkpointModalOpen
+
+    set({
+      status: statusResp.status as PipelineStatus,
+      currentStage: statusResp.current_stage ?? null,
+      progressPct: statusResp.progress_pct ?? 0,
+      checkpoint,
+      error: statusResp.error ?? null,
+      checkpointModalOpen: shouldOpenModal ? true : get().checkpointModalOpen,
+    })
+
+    // Auto-switch to Gallery tab when deck is complete
+    if (
+      (statusResp.status === 'completed' || statusResp.status === 'complete') &&
+      get().activeTab === 'intake'
+    ) {
+      set({ activeTab: 'gallery', isPolling: false })
+    }
+  },
+
+  setPolling: (polling) => set({ isPolling: polling }),
+
+  setEnvelope: (envelope) =>
+    set({
+      envelope,
+      status: 'completed',
+      isPolling: false,
+      activeTab: 'gallery',
+    }),
+
+  resetSession: () =>
+    set({
+      ...initialSessionSlice,
+      ...initialDeckSlice,
+      activeTab: 'intake',
+      exportResult: null,
+      checkpointModalOpen: false,
+    }),
+
+  // ── Deck / slide editing actions ───────────────────────────────────────────
+
+  selectSlide: (slideId) => set({ selectedSlideId: slideId }),
+
+  setEditingSlide: (slideId) => set({ editingSlideId: slideId }),
+
+  updateSlideInStore: (updatedSlide) => {
+    const { envelope } = get()
+    if (!envelope?.deck) return
+
+    // Update in main slides
+    const slides = envelope.deck.slides.map((s) =>
+      s.slide_id === updatedSlide.slide_id ? updatedSlide : s,
+    )
+
+    // Update in appendix slides
+    const appendixSlides = envelope.deck.appendix.slides.map((s) =>
+      s.slide_id === updatedSlide.slide_id ? updatedSlide : s,
+    )
+
+    set({
+      envelope: {
+        ...envelope,
+        deck: {
+          ...envelope.deck,
+          slides,
+          appendix: {
+            ...envelope.deck.appendix,
+            slides: appendixSlides,
+          },
+        },
+      },
+    })
+  },
+
+  // ── UI actions ─────────────────────────────────────────────────────────────
+
+  setTab: (tab) => set({ activeTab: tab }),
+
+  toggleSpeakerNotes: () => set((s) => ({ showSpeakerNotes: !s.showSpeakerNotes })),
+
+  toggleAppendix: () => set((s) => ({ showAppendix: !s.showAppendix })),
+
+  openCheckpointModal: () => set({ checkpointModalOpen: true }),
+
+  closeCheckpointModal: () => set({ checkpointModalOpen: false }),
+
+  setExportResult: (result) => set({ exportResult: result }),
+}))
+
+// ── Selectors ──────────────────────────────────────────────────────────────────
+
+/** Returns the currently selected Slide (main or appendix), or null. */
+export function useSelectedSlide() {
+  return useStore((s) => {
+    if (!s.selectedSlideId || !s.envelope?.deck) return null
+    const all = [...s.envelope.deck.slides, ...s.envelope.deck.appendix.slides]
+    return all.find((sl) => sl.slide_id === s.selectedSlideId) ?? null
+  })
+}
+
+/** Returns true if the pipeline is in a terminal state. */
+export function useIsTerminal() {
+  return useStore((s) =>
+    s.status !== null &&
+    ['completed', 'complete', 'failed', 'cancelled', 'rejected'].includes(s.status),
+  )
+}
+
+/** Returns the active checkpoint, if any. */
+export function useCheckpoint() {
+  return useStore((s) => s.checkpoint)
+}

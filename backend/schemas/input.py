@@ -312,12 +312,12 @@ class CheckpointApproveRequest(BaseModel):
     """
 
     session_id: str = Field(
-        ...,
+        default="",
         description="Active generation session identifier.",
     )
 
     checkpoint_id: str = Field(
-        ...,
+        default="",
         description="Identifier of the checkpoint being approved.",
     )
 
@@ -325,6 +325,11 @@ class CheckpointApproveRequest(BaseModel):
         default=None,
         max_length=2000,
         description="Optional free-text comment from the reviewer (e.g., minor notes, praise).",
+    )
+
+    edits: dict | None = Field(
+        default=None,
+        description="Optional edits to apply to the stage output before resuming.",
     )
 
 
@@ -377,27 +382,24 @@ class CheckpointRejectRequest(BaseModel):
 class GenerateResponse(BaseModel):
     """
     Immediate acknowledgement returned when a deck generation request is accepted.
-
-    The actual deck is delivered asynchronously via Server-Sent Events (SSE)
-    on the /sessions/{session_id}/stream endpoint.
     """
 
     session_id: str = Field(
         ...,
-        description="Unique identifier for this generation session. Use it to poll or stream progress.",
+        description="Unique identifier for this generation session. Poll /status for progress.",
     )
 
     status: str = Field(
         default="accepted",
-        description="Always 'accepted' for a successful submission.",
+        description="Always 'accepted' (or 'processing') for a successful submission.",
     )
 
     message: str = Field(
-        default="Deck generation started. Stream progress at /sessions/{session_id}/stream.",
+        default="Deck generation started. Poll /api/deck/{session_id}/status for progress.",
         description="Human-readable acknowledgement.",
     )
 
     stream_url: str = Field(
-        ...,
-        description="Full path to the SSE streaming endpoint for this session.",
+        default="",
+        description="URL to poll for session status.",
     )
