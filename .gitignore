@@ -1,0 +1,95 @@
+# ─── Python ───────────────────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+pip-wheel-metadata/
+
+# ─── Test & Coverage ──────────────────────────────────────────────────────────
+htmlcov/
+coverage_html/
+.coverage
+.coverage.*
+*.cover
+coverage.xml
+nosetests.xml
+test-results/
+
+# ─── Environment & Secrets ────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.env.local
+*.env.production
+*.env.staging
+secrets.json
+*.pem
+*.key
+
+# ─── Application Data ─────────────────────────────────────────────────────────
+data/
+*.db
+*.sqlite
+*.sqlite3
+backend/data/
+backend/output/
+output/
+
+# ─── Logs ─────────────────────────────────────────────────────────────────────
+logs/
+*.log
+*.log.*
+
+# ─── Node / Frontend ──────────────────────────────────────────────────────────
+node_modules/
+frontend/dist/
+frontend/build/
+frontend/.next/
+frontend/out/
+frontend/coverage/
+.npm/
+
+# ─── Vite / Build Artifacts ───────────────────────────────────────────────────
+*.local
+dist-ssr/
+
+# ─── Playwright ───────────────────────────────────────────────────────────────
+frontend/test-results/
+frontend/playwright-report/
+frontend/playwright/.cache/
+
+# ─── IDE & Editor ─────────────────────────────────────────────────────────────
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json.example
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+
+# ─── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# ─── Deployment ───────────────────────────────────────────────────────────────
+deploy/*.env
