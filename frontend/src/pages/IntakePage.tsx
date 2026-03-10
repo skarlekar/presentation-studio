@@ -7,6 +7,7 @@ import { useStore } from '@/store'
 import { useShallow } from 'zustand/react/shallow'
 import { useDeck } from '@/hooks/useDeck'
 import AgentStatusBadge from '@/components/AgentStatusBadge'
+import { fetchUrl, ApiError } from '@/api/client'
 import type { DeckRequest, DeckType, DecisionInformAsk } from '@/types'
 
 const DECK_TYPES: DeckType[] = [
@@ -36,6 +37,12 @@ export default function IntakePage() {
   const [mustInclude, setMustInclude] = useState('')
   const [topMsg, setTopMsg] = useState('')
 
+  // URL fetcher state
+  const [urlInput, setUrlInput] = useState('')
+  const [urlFetching, setUrlFetching] = useState(false)
+  const [urlError, setUrlError] = useState<string | null>(null)
+  const [urlSuccess, setUrlSuccess] = useState<string | null>(null)
+
   const { status, progressPct, currentStage, error, isPolling } = useStore(useShallow((s) => ({
     status: s.status,
     progressPct: s.progressPct,
@@ -55,6 +62,28 @@ export default function IntakePage() {
     },
     [],
   )
+
+  const handleFetchUrl = async () => {
+    const url = urlInput.trim()
+    if (!url) return
+    setUrlFetching(true)
+    setUrlError(null)
+    setUrlSuccess(null)
+    try {
+      const result = await fetchUrl(url)
+      // Append fetched content to existing source material (don't clobber)
+      const existing = (form.source_material ?? '').trim()
+      const separator = existing ? '\n\n---\n\n' : ''
+      const header = result.title ? `Source: ${result.title}\nURL: ${url}\n\n` : `Source URL: ${url}\n\n`
+      set('source_material', existing + separator + header + result.content)
+      setUrlSuccess(`Fetched ${result.char_count.toLocaleString()} characters${result.title ? ` from "${result.title}"` : ''}`)
+      setUrlInput('')
+    } catch (err) {
+      setUrlError(err instanceof ApiError ? err.detail : 'Failed to fetch URL')
+    } finally {
+      setUrlFetching(false)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -124,13 +153,56 @@ export default function IntakePage() {
               Source Material
               <span className="text-gray-400 font-normal ml-2">(optional — paste research, reports, data)</span>
             </label>
+
+            {/* URL Fetcher */}
+            <div className="mb-2">
+              <div className="flex gap-2">
+                <input
+                  type="url"
+                  value={urlInput}
+                  onChange={(e) => { setUrlInput(e.target.value); setUrlError(null); setUrlSuccess(null) }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleFetchUrl() } }}
+                  placeholder="Paste a URL to fetch content automatically (Medium, LinkedIn, blogs…)"
+                  className="flex-1 border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  disabled={urlFetching}
+                />
+                <button
+                  type="button"
+                  onClick={handleFetchUrl}
+                  disabled={urlFetching || !urlInput.trim()}
+                  className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl disabled:opacity-40 transition-colors whitespace-nowrap flex items-center gap-1.5"
+                >
+                  {urlFetching ? (
+                    <><span className="animate-spin text-base">⏳</span> Fetching…</>
+                  ) : (
+                    <><span>🔗</span> Fetch URL</>
+                  )}
+                </button>
+              </div>
+              {urlError && (
+                <p className="mt-1.5 text-xs text-red-600 flex items-center gap-1">
+                  <span>⚠️</span> {urlError}
+                </p>
+              )}
+              {urlSuccess && (
+                <p className="mt-1.5 text-xs text-green-700 flex items-center gap-1">
+                  <span>✓</span> {urlSuccess}
+                </p>
+              )}
+            </div>
+
             <textarea
               value={form.source_material ?? ''}
               onChange={(e) => set('source_material', e.target.value)}
-              rows={4}
-              placeholder="Paste documents, research, data, or transcripts here. The AI will extract evidence and key insights."
+              rows={6}
+              placeholder="Paste documents, research, data, or transcripts here — or use the URL fetcher above."
               className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
             />
+            {form.source_material && (
+              <p className="mt-1 text-xs text-gray-400 text-right">
+                {(form.source_material ?? '').length.toLocaleString()} characters
+              </p>
+            )}
           </div>
 
           {/* Row: deck type + DIA */}

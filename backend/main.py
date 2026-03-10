@@ -21,7 +21,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.config.settings import get_settings
-from backend.api.routes import deck, health
+from backend.api.routes import deck, health, fetch_url
 from backend.services.session_service import get_session_service
 
 settings = get_settings()
@@ -107,6 +107,7 @@ app.add_middleware(
 
 app.include_router(health.router, prefix="/api")
 app.include_router(deck.router, prefix="/api/deck", tags=["deck"])
+app.include_router(fetch_url.router, prefix="/api", tags=["deck"])
 
 
 # ─────────────────────────────────────────────────────────────────────────────

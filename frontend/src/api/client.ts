@@ -205,6 +205,17 @@ export async function getDeckHistory(
   return request('GET', `/api/deck/${sessionId}/history`)
 }
 
+// ── URL Fetcher ───────────────────────────────────────────────────────────────
+
+export async function fetchUrl(url: string): Promise<{
+  url: string
+  title: string | null
+  content: string
+  char_count: number
+}> {
+  return request('POST', '/api/deck/fetch-url', { url })
+}
+
 // ── Health ────────────────────────────────────────────────────────────────────
 
 export async function checkHealth(): Promise<{

@@ -17,6 +17,8 @@ from pathlib import Path
 
 from deepagents import create_deep_agent
 from langgraph.checkpoint.sqlite import SqliteSaver
+from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
 import sqlite3
 
 from backend.config.settings import get_settings
@@ -84,24 +86,40 @@ def get_checkpointer() -> SqliteSaver:
     return checkpointer
 
 
-def resolve_model_string(api_key: str | None = None) -> str:
-    """Resolve the DeepAgents model string, applying a runtime API key if provided.
+def _build_llm(api_key: str | None = None):
+    """Construct the LLM client for the orchestrator.
 
-    If api_key is provided, it temporarily sets the env var for this process so
-    that the LangChain/Anthropic client picks it up. The key is never stored.
+    Builds a typed LangChain model instance so the API key is passed explicitly
+    rather than relying on environment variable lookup (which can miss runtime
+    keys supplied per-request from the frontend).
 
     Args:
-        api_key: Optional Anthropic API key supplied by the user at request time.
+        api_key: Anthropic or OpenAI API key, either from env or from the request.
 
     Returns:
-        The model string for create_deep_agent (e.g. "anthropic/claude-opus-4-5").
+        A configured ChatAnthropic or ChatOpenAI instance.
     """
-    import os
-    if api_key and settings.llm_provider == "anthropic":
-        os.environ["ANTHROPIC_API_KEY"] = api_key
-    elif api_key and settings.llm_provider == "openai":
-        os.environ["OPENAI_API_KEY"] = api_key
-    return settings.deepagents_model
+    key = api_key or settings.active_api_key
+    if settings.llm_provider == "anthropic":
+        kwargs = dict(
+            model_name=settings.anthropic_model,
+            temperature=settings.llm_temperature,
+            max_tokens=settings.llm_max_tokens,
+            timeout=settings.llm_timeout_seconds,
+        )
+        if key:
+            kwargs["api_key"] = key
+        return ChatAnthropic(**kwargs)
+    else:
+        kwargs = dict(
+            model=settings.openai_model,
+            temperature=settings.llm_temperature,
+            max_tokens=settings.llm_max_tokens,
+            timeout=settings.llm_timeout_seconds,
+        )
+        if key:
+            kwargs["api_key"] = key
+        return ChatOpenAI(**kwargs)
 
 
 def create_orchestrator(api_key: str | None = None):
@@ -114,7 +132,7 @@ def create_orchestrator(api_key: str | None = None):
         Compiled LangGraph agent graph with HITL interrupts and SQLite checkpointing.
     """
     checkpointer = get_checkpointer()
-    model = resolve_model_string(api_key)
+    model = _build_llm(api_key)
 
     orchestrator = create_deep_agent(
         name="deck-orchestrator",
@@ -160,11 +178,10 @@ def get_orchestrator(api_key: str | None = None):
     global _orchestrator
 
     # If a key is supplied from the frontend and not already in env, apply it
-    if api_key and not settings.api_key_configured:
-        resolve_model_string(api_key)  # Sets the env var
-        if _orchestrator is None:
-            _orchestrator = create_orchestrator(api_key)
-        return _orchestrator
+    # Always create a fresh orchestrator when a user-supplied key is provided,
+    # so the explicit key is baked into the LLM client (not env-var dependent).
+    if api_key:
+        return create_orchestrator(api_key)
 
     if _orchestrator is None:
         _orchestrator = create_orchestrator()
