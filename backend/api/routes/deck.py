@@ -178,28 +178,75 @@ def _extract_pending_input(state) -> dict:
     return {}
 
 
+def _extract_json_from_content(content: str) -> Optional[dict]:
+    """Extract JSON from a string that may be a raw JSON object or a markdown code block.
+
+    Handles:
+    - Raw JSON: ``{"key": ...}``
+    - Fenced code block: ```json\\n{...}\\n```
+    - Fenced code block without language tag: ```\\n{...}\\n```
+    """
+    import re
+    text = content.strip()
+
+    # Try fenced code blocks first (```json ... ``` or ``` ... ```)
+    fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if fence_match:
+        try:
+            return json.loads(fence_match.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # Try the whole string as JSON
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict):
+            return data
+    except json.JSONDecodeError:
+        pass
+
+    # Last resort: find the first { ... } block spanning the full content
+    brace_match = re.search(r"\{.*\}", text, re.DOTALL)
+    if brace_match:
+        try:
+            data = json.loads(brace_match.group(0))
+            if isinstance(data, dict):
+                return data
+        except json.JSONDecodeError:
+            pass
+
+    return None
+
+
 def _extract_deck_from_result(result: Any) -> Optional[DeckEnvelope]:
-    """Extract a DeckEnvelope from the orchestrator result."""
+    """Extract a DeckEnvelope from the orchestrator result.
+
+    Handles three cases:
+    1. result IS already a DeckEnvelope (structured output mode)
+    2. result is a dict with a "messages" key — parse last message content as JSON
+       (plain output mode where the LLM emits a JSON code block)
+    3. result is a dict that validates directly as DeckEnvelope
+    """
     if isinstance(result, DeckEnvelope):
         return result
 
     if isinstance(result, dict):
-        # Try messages[-1].content if result has messages key
+        # Walk messages from last to first looking for a parseable DeckEnvelope
         messages = result.get("messages", [])
-        if messages:
-            last = messages[-1]
-            content = getattr(last, "content", None) or (
-                last.get("content") if isinstance(last, dict) else None
+        for msg in reversed(messages):
+            content = getattr(msg, "content", None) or (
+                msg.get("content") if isinstance(msg, dict) else None
             )
-            if content:
+            if not content or not isinstance(content, str):
+                continue
+            data = _extract_json_from_content(content)
+            if data:
                 try:
-                    data = json.loads(content) if isinstance(content, str) else content
-                    if isinstance(data, dict):
-                        return DeckEnvelope.model_validate(data)
-                except (json.JSONDecodeError, Exception):
-                    pass
+                    return DeckEnvelope.model_validate(data)
+                except Exception:
+                    pass  # Not a DeckEnvelope — keep scanning
 
-        # Try direct dict validation
+        # Try direct dict validation as last resort
         try:
             return DeckEnvelope.model_validate(result)
         except Exception:
@@ -288,8 +335,16 @@ async def resume_pipeline(session_id: str) -> None:
         session_id: The session to resume.
     """
     config = {"configurable": {"thread_id": session_id}}
-    orchestrator = get_orchestrator()
     session_svc = get_session_service()
+
+    # Retrieve the api_key from the original request (stored in session.request_data)
+    # so the resumed pipeline uses the same LLM credentials as the initial run.
+    session = await session_svc.get_session(session_id)
+    stored_api_key = (
+        (session.request_data or {}).get("api_key")
+        if session else None
+    )
+    orchestrator = get_orchestrator(api_key=stored_api_key)
 
     try:
         await session_svc.update_status(session_id, PipelineStatus.RUNNING)

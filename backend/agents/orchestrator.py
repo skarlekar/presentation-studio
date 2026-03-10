@@ -64,11 +64,24 @@ After quality_validator runs:
 
 ## OUTPUT FORMAT
 
-Return the complete DeckEnvelope JSON as your final response, including:
-- session_id
-- status: "completed"
-- deck: with all main slides and appendix slides
-- created_at: ISO-8601 timestamp
+When the pipeline is complete, emit your FINAL response as a raw JSON code block with no
+surrounding commentary. The JSON must conform to the DeckEnvelope schema:
+
+```json
+{
+  "session_id": "<session_id>",
+  "status": "completed",
+  "created_at": "<ISO-8601 timestamp>",
+  "deck": {
+    "title": "...",
+    "slides": [...],
+    "appendix_slides": [...]
+  }
+}
+```
+
+IMPORTANT: Your absolute last message must be ONLY the ```json ... ``` code block.
+Do not add any explanation before or after the JSON block in your final message.
 """
 
 
@@ -143,7 +156,11 @@ def create_orchestrator(api_key: str | None = None):
             "task": True,  # Pause before EVERY subagent call for HITL
         },
         checkpointer=checkpointer,
-        response_format=DeckEnvelope,
+        # response_format intentionally omitted: Anthropic's grammar compiler rejects the
+        # combination of DeckEnvelope schema + subagent task tools (too many tools + complex
+        # schema = "compiled grammar too large"). Instead, the system prompt instructs the
+        # orchestrator to emit a JSON code block as its final message, which deck.py parses
+        # via _extract_deck_from_result().
         subagents=[
             INSIGHT_EXTRACTOR_CONFIG,
             DECK_ARCHITECT_CONFIG,
