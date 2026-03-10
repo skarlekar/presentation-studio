@@ -42,13 +42,16 @@ class PipelineStatus(str, Enum):
     """Lifecycle states of a deck generation session."""
 
     PENDING = "pending"
+    RUNNING = "running"
     EXTRACTING_INSIGHTS = "extracting_insights"
     GENERATING_OUTLINE = "generating_outline"
+    AWAITING_APPROVAL = "awaiting_approval"
     AWAITING_OUTLINE_APPROVAL = "awaiting_outline_approval"
     GENERATING_SLIDES = "generating_slides"
     AWAITING_REVIEW_APPROVAL = "awaiting_review_approval"
     VALIDATING = "validating"
     COMPLETE = "complete"
+    COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
 
@@ -496,13 +499,23 @@ class Checkpoint(BaseModel):
     )
 
     session_id: str = Field(
-        ...,
+        default="",
         description="Parent generation session.",
     )
 
     stage: str = Field(
         ...,
         description="Pipeline stage at which this checkpoint was raised.",
+    )
+
+    stage_index: int = Field(
+        default=0,
+        description="1-based index of this stage in the pipeline sequence.",
+    )
+
+    label: str = Field(
+        default="",
+        description="Human-readable label for this checkpoint (e.g. 'Confirm Core Insights').",
     )
 
     status: CheckpointStatus = Field(
@@ -518,13 +531,34 @@ class Checkpoint(BaseModel):
         ),
     )
 
+    # Alias fields used by the pipeline (stored alongside payload)
+    pending_input: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Pending input data for the next agent stage.",
+    )
+
+    preview: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional rendered preview of the stage output.",
+    )
+
     feedback: str | None = Field(
         default=None,
         description="Human feedback provided on rejection.",
     )
 
+    resolution: str | None = Field(
+        default=None,
+        description="Resolution string: 'approved' or 'rejected'.",
+    )
+
+    edits: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional edits submitted with approval.",
+    )
+
     created_at: str = Field(
-        ...,
+        default="",
         description="ISO-8601 UTC timestamp when the checkpoint was raised.",
     )
 

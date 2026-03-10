@@ -315,6 +315,24 @@ class Settings(BaseSettings):
     # DERIVED PROPERTIES
     # ─────────────────────────────────────────
 
+    # ─────────────────────────────────────────
+    # PIPELINE / DEEPAGENTS
+    # ─────────────────────────────────────────
+
+    deepagents_checkpoint_db: str = Field(
+        default="data/checkpoints/pipeline.db",
+        description="Path to SQLite DB used by LangGraph SqliteSaver for pipeline checkpoints.",
+    )
+
+    export_dir: str = Field(
+        default="data/exports",
+        description="Directory where exported deck JSON files are saved.",
+    )
+
+    # ─────────────────────────────────────────
+    # DERIVED PROPERTIES
+    # ─────────────────────────────────────────
+
     @property
     def is_development(self) -> bool:
         """True when running in the development environment."""
@@ -343,6 +361,43 @@ class Settings(BaseSettings):
         if self.llm_provider == "anthropic":
             return self.anthropic_api_key
         return self.openai_api_key
+
+    # ── Compatibility aliases ─────────────────────────────────────────────
+
+    @property
+    def deepagents_model(self) -> str:
+        """Alias for active_model — used by orchestrator."""
+        return self.active_model
+
+    @property
+    def app_host(self) -> str:
+        """Alias for host — used by main.py."""
+        return self.host
+
+    @property
+    def app_port(self) -> int:
+        """Alias for port — used by main.py."""
+        return self.port
+
+    @property
+    def app_env_name(self) -> str:
+        """Alias for app_env — used by main.py."""
+        return self.app_env
+
+    @property
+    def app_log_level(self) -> str:
+        """Return log level in lowercase for uvicorn — used by main.py."""
+        return self.log_level.lower()
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        """Alias for cors_origins — used by main.py."""
+        return self.cors_origins
+
+    @property
+    def session_ttl_minutes(self) -> int:
+        """Session TTL in minutes derived from session_ttl_seconds."""
+        return self.session_ttl_seconds // 60
 
 
 @lru_cache(maxsize=1)
