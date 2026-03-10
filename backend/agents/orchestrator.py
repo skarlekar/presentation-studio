@@ -152,9 +152,9 @@ def create_orchestrator(api_key: str | None = None):
         model=model,
         system_prompt=ORCHESTRATOR_SYSTEM_PROMPT,
         tools=[],  # Only uses built-in task tool for subagent delegation
-        interrupt_on={
-            "task": True,  # Pause before EVERY subagent call for HITL
-        },
+        # interrupt_on intentionally omitted: per-subagent HITL creates 5+ identical modals
+        # with no stage context, creating a confusing UX. Human review happens once via
+        # the Gallery tab "Approve" button after the full deck is generated.
         checkpointer=checkpointer,
         # response_format intentionally omitted: Anthropic's grammar compiler rejects the
         # combination of DeckEnvelope schema + subagent task tools (too many tools + complex
