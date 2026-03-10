@@ -4,6 +4,7 @@
  */
 import { useState, useCallback } from 'react'
 import { useStore } from '@/store'
+import { useShallow } from 'zustand/react/shallow'
 import { useDeck } from '@/hooks/useDeck'
 import AgentStatusBadge from '@/components/AgentStatusBadge'
 import type { DeckRequest, DeckType, DecisionInformAsk } from '@/types'
@@ -35,13 +36,13 @@ export default function IntakePage() {
   const [mustInclude, setMustInclude] = useState('')
   const [topMsg, setTopMsg] = useState('')
 
-  const { status, progressPct, currentStage, error, isPolling } = useStore((s) => ({
+  const { status, progressPct, currentStage, error, isPolling } = useStore(useShallow((s) => ({
     status: s.status,
     progressPct: s.progressPct,
     currentStage: s.currentStage,
     error: s.error,
     isPolling: s.isPolling,
-  }))
+  })))
   const { startGeneration, reset } = useDeck()
 
   const isRunning = isPolling || status === 'running' || status === 'awaiting_approval'

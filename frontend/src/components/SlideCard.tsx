@@ -4,6 +4,7 @@
  */
 import clsx from 'clsx'
 import { useStore } from '@/store'
+import { useShallow } from 'zustand/react/shallow'
 import type { Slide } from '@/types'
 
 interface Props {
@@ -19,10 +20,10 @@ const SECTION_COLORS: Record<string, string> = {
 }
 
 export default function SlideCard({ slide, isAppendix = false }: Props) {
-  const { selectedSlideId, selectSlide } = useStore((s) => ({
+  const { selectedSlideId, selectSlide } = useStore(useShallow((s) => ({
     selectedSlideId: s.selectedSlideId,
     selectSlide: s.selectSlide,
-  }))
+  })))
 
   const isSelected = selectedSlideId === slide.slide_id
   const sectionColor = SECTION_COLORS[slide.section] ?? 'border-l-gray-200'

@@ -3,6 +3,7 @@
  * Composes the 4 sub-editors + speaker notes toggle.
  */
 import { useStore, useSelectedSlide } from '@/store'
+import { useShallow } from 'zustand/react/shallow'
 import { useDeck } from '@/hooks/useDeck'
 import TitleEditor from '@/components/editors/TitleEditor'
 import MetaphorEditor from '@/components/editors/MetaphorEditor'
@@ -10,11 +11,11 @@ import KeyPointsEditor from '@/components/editors/KeyPointsEditor'
 import EvidenceEditor from '@/components/editors/EvidenceEditor'
 
 export default function SlideEditor() {
-  const { showSpeakerNotes, toggleSpeakerNotes, status } = useStore((s) => ({
+  const { showSpeakerNotes, toggleSpeakerNotes, status } = useStore(useShallow((s) => ({
     showSpeakerNotes: s.showSpeakerNotes,
     toggleSpeakerNotes: s.toggleSpeakerNotes,
     status: s.status,
-  }))
+  })))
   const slide = useSelectedSlide()
   const { editSlide } = useDeck()
 

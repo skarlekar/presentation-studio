@@ -1,6 +1,8 @@
 /**
  * useDeck — orchestrates polling, checkpoint handling, and deck operations.
- * Components use this hook instead of calling the API directly.
+ *
+ * Zustand pattern: use `useStore.getState()` inside callbacks (stable, no re-renders).
+ * Use individual selectors for state values that drive renders.
  */
 import { useCallback } from 'react'
 import { useStore } from '@/store'
@@ -20,32 +22,44 @@ import {
 import type { DeckRequest, CheckpointApproveRequest } from '@/types'
 
 export function useDeck() {
-  const store = useStore()
+  // ── State selectors (stable if selected value doesn't change) ──────────────
+  const sessionId    = useStore(s => s.sessionId)
+  const status       = useStore(s => s.status)
+  const currentStage = useStore(s => s.currentStage)
+  const progressPct  = useStore(s => s.progressPct)
+  const checkpoint   = useStore(s => s.checkpoint)
+  const error        = useStore(s => s.error)
+  const isPolling    = useStore(s => s.isPolling)
+  const envelope     = useStore(s => s.envelope)
+  const exportResult = useStore(s => s.exportResult)
+  const apiKey       = useStore(s => s.apiKey)
+  const apiKeyConfigured = useStore(s => s.apiKeyConfigured)
+  const apiKeyChecked    = useStore(s => s.apiKeyChecked)
 
-  // ── Health check (called once on first render from AppShell) ───────────────
+  // ── Health check (one-time on mount) ───────────────────────────────────────
+  // Uses getState() so deps array can be empty — no infinite loop.
 
   const checkApiKeyStatus = useCallback(async () => {
     try {
       const health = await checkHealth()
-      store.setApiKeyStatus(health.api_key_configured)
+      useStore.getState().setApiKeyStatus(health.api_key_configured)
     } catch {
-      // Backend not reachable — assume key not configured, let user supply it
-      store.setApiKeyStatus(false)
+      useStore.getState().setApiKeyStatus(false)
     }
-  }, [store])
+  }, []) // stable — intentionally empty deps
 
   // ── Start pipeline ──────────────────────────────────────────────────────────
 
   const startGeneration = useCallback(async (req: DeckRequest) => {
+    const { apiKey: key, apiKeyConfigured: configured, startSession, updateFromStatus } =
+      useStore.getState()
     try {
-      // Attach user-supplied API key if the server doesn't have one configured
-      const reqWithKey: DeckRequest = store.apiKey && !store.apiKeyConfigured
-        ? { ...req, api_key: store.apiKey }
-        : req
+      const reqWithKey: DeckRequest =
+        key && !configured ? { ...req, api_key: key } : req
       const resp = await generateDeck(reqWithKey)
-      store.startSession(resp.session_id, reqWithKey)
+      startSession(resp.session_id, reqWithKey)
     } catch (err) {
-      store.updateFromStatus({
+      updateFromStatus({
         session_id: '',
         status: 'failed',
         error: err instanceof ApiError ? err.detail : String(err),
@@ -53,131 +67,126 @@ export function useDeck() {
         updated_at: new Date().toISOString(),
       })
     }
-  }, [store])
+  }, [])
 
   // ── Poll session status ─────────────────────────────────────────────────────
 
   const pollTick = useCallback(async (): Promise<boolean | void> => {
-    if (!store.sessionId) return true // stop
+    const { sessionId: sid, updateFromStatus, setPolling, setEnvelope } =
+      useStore.getState()
+    if (!sid) return true
 
     try {
-      const statusResp = await getSessionStatus(store.sessionId)
-      store.updateFromStatus(statusResp)
+      const statusResp = await getSessionStatus(sid)
+      updateFromStatus(statusResp)
 
       const terminal = ['completed', 'complete', 'failed', 'cancelled', 'rejected']
       if (terminal.includes(statusResp.status)) {
-        // Fetch the full deck if completed
         if (statusResp.status === 'completed' || statusResp.status === 'complete') {
-          const envelope = await getDeck(store.sessionId)
-          if (envelope) {
-            store.setEnvelope(envelope)
-          }
+          const env = await getDeck(sid)
+          if (env) setEnvelope(env)
         }
-        store.setPolling(false)
-        return true // stop polling
+        setPolling(false)
+        return true
       }
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
-        store.setPolling(false)
+        useStore.getState().setPolling(false)
         return true
       }
-      // Non-fatal: keep polling
       console.warn('[useDeck] Poll error:', err)
     }
-  }, [store])
+  }, [])
 
-  usePolling({
-    enabled: store.isPolling,
-    onTick: pollTick,
-  })
+  usePolling({ enabled: isPolling, onTick: pollTick })
 
   // ── Checkpoint operations ───────────────────────────────────────────────────
 
-  const approve = useCallback(
-    async (body: CheckpointApproveRequest = {}) => {
-      if (!store.sessionId || !store.checkpoint) return
-      try {
-        await approveCheckpoint(store.sessionId, store.checkpoint.checkpoint_id, body)
-        store.closeCheckpointModal()
-        store.setPolling(true)
-      } catch (err) {
-        console.error('[useDeck] Approve error:', err)
-      }
-    },
-    [store],
-  )
+  const approve = useCallback(async (body: CheckpointApproveRequest = {}) => {
+    const { sessionId: sid, checkpoint: cp, closeCheckpointModal, setPolling } =
+      useStore.getState()
+    if (!sid || !cp) return
+    try {
+      await approveCheckpoint(sid, cp.checkpoint_id, body)
+      closeCheckpointModal()
+      setPolling(true)
+    } catch (err) {
+      console.error('[useDeck] Approve error:', err)
+    }
+  }, [])
 
-  const reject = useCallback(
-    async (feedback: string) => {
-      if (!store.sessionId || !store.checkpoint) return
-      try {
-        await rejectCheckpoint(store.sessionId, store.checkpoint.checkpoint_id, feedback)
-        store.closeCheckpointModal()
-        store.updateFromStatus({
-          session_id: store.sessionId,
-          status: 'rejected',
-          error: `Rejected: ${feedback}`,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-      } catch (err) {
-        console.error('[useDeck] Reject error:', err)
-      }
-    },
-    [store],
-  )
+  const reject = useCallback(async (feedback: string) => {
+    const { sessionId: sid, checkpoint: cp, closeCheckpointModal, updateFromStatus } =
+      useStore.getState()
+    if (!sid || !cp) return
+    try {
+      await rejectCheckpoint(sid, cp.checkpoint_id, feedback)
+      closeCheckpointModal()
+      updateFromStatus({
+        session_id: sid,
+        status: 'rejected',
+        error: `Rejected: ${feedback}`,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+    } catch (err) {
+      console.error('[useDeck] Reject error:', err)
+    }
+  }, [])
 
   // ── Slide editing ───────────────────────────────────────────────────────────
 
   const editSlide = useCallback(
     async (slideId: string, field: string, value: unknown) => {
-      if (!store.sessionId) return null
+      const { sessionId: sid, updateSlideInStore } = useStore.getState()
+      if (!sid) return null
       try {
-        const result = await updateSlide(store.sessionId, slideId, field, value)
-        store.updateSlideInStore(result.slide)
-        return result.validation
+        const result = await updateSlide(sid, slideId, field, value)
+        if (result?.slide) updateSlideInStore(result.slide)
+        return result?.validation ?? null
       } catch (err) {
         console.error('[useDeck] Edit slide error:', err)
         return null
       }
     },
-    [store],
+    [],
   )
 
   // ── Export ──────────────────────────────────────────────────────────────────
 
   const approve_and_export = useCallback(async () => {
-    if (!store.sessionId) return
+    const { sessionId: sid, setExportResult, setTab } = useStore.getState()
+    if (!sid) return null
     try {
-      await approveDeck(store.sessionId)
-      const result = await exportDeck(store.sessionId)
-      store.setExportResult(result)
-      store.setTab('export')
+      await approveDeck(sid)
+      const result = await exportDeck(sid)
+      setExportResult(result)
+      setTab('export')
       return result
     } catch (err) {
       console.error('[useDeck] Export error:', err)
       return null
     }
-  }, [store])
+  }, [])
 
   const reset = useCallback(() => {
-    store.resetSession()
-  }, [store])
+    useStore.getState().resetSession()
+  }, [])
 
   return {
     // State
-    sessionId: store.sessionId,
-    status: store.status,
-    currentStage: store.currentStage,
-    progressPct: store.progressPct,
-    checkpoint: store.checkpoint,
-    error: store.error,
-    isPolling: store.isPolling,
-    envelope: store.envelope,
-    exportResult: store.exportResult,
-    apiKey: store.apiKey,
-    apiKeyConfigured: store.apiKeyConfigured,
-    apiKeyChecked: store.apiKeyChecked,
+    sessionId,
+    status,
+    currentStage,
+    progressPct,
+    checkpoint,
+    error,
+    isPolling,
+    envelope,
+    exportResult,
+    apiKey,
+    apiKeyConfigured,
+    apiKeyChecked,
 
     // Actions
     startGeneration,

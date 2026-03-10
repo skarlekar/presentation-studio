@@ -2,14 +2,15 @@
  * AppendixSection — collapsible appendix slide list in the gallery.
  */
 import { useStore } from '@/store'
+import { useShallow } from 'zustand/react/shallow'
 import SlideCard from '@/components/SlideCard'
 
 export default function AppendixSection() {
-  const { showAppendix, toggleAppendix, envelope } = useStore((s) => ({
+  const { showAppendix, toggleAppendix, envelope } = useStore(useShallow((s) => ({
     showAppendix: s.showAppendix,
     toggleAppendix: s.toggleAppendix,
     envelope: s.envelope,
-  }))
+  })))
 
   const appendixSlides = envelope?.deck?.appendix?.slides ?? []
   if (appendixSlides.length === 0) return null

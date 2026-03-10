@@ -4,6 +4,7 @@
  */
 import { useState, useEffect } from 'react'
 import { useStore } from '@/store'
+import { useShallow } from 'zustand/react/shallow'
 import { useDeck } from '@/hooks/useDeck'
 import { getDeckHistory } from '@/api/client'
 import JsonPreview from '@/components/JsonPreview'
@@ -16,11 +17,11 @@ interface VersionEntry {
 }
 
 export default function ExportPage() {
-  const { envelope, exportResult, sessionId } = useStore((s) => ({
+  const { envelope, exportResult, sessionId } = useStore(useShallow((s) => ({
     envelope: s.envelope,
     exportResult: s.exportResult,
     sessionId: s.sessionId,
-  }))
+  })))
   const { approve_and_export } = useDeck()
   const [versions, setVersions] = useState<VersionEntry[]>([])
   const [loadingHistory, setLoadingHistory] = useState(false)

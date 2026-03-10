@@ -6,13 +6,11 @@ import { useState } from 'react'
 import { useStore } from '@/store'
 
 export default function ApiKeyBanner() {
-  const { apiKey, apiKeyConfigured, apiKeyChecked, setApiKey, clearApiKey } = useStore((s) => ({
-    apiKey: s.apiKey,
-    apiKeyConfigured: s.apiKeyConfigured,
-    apiKeyChecked: s.apiKeyChecked,
-    setApiKey: s.setApiKey,
-    clearApiKey: s.clearApiKey,
-  }))
+  const apiKey           = useStore(s => s.apiKey)
+  const apiKeyConfigured = useStore(s => s.apiKeyConfigured)
+  const apiKeyChecked    = useStore(s => s.apiKeyChecked)
+  const setApiKey        = useStore(s => s.setApiKey)
+  const clearApiKey      = useStore(s => s.clearApiKey)
 
   const [draft, setDraft] = useState('')
   const [showKey, setShowKey] = useState(false)

@@ -4,13 +4,14 @@
  */
 import { useState } from 'react'
 import { useStore } from '@/store'
+import { useShallow } from 'zustand/react/shallow'
 import { useDeck } from '@/hooks/useDeck'
 
 export default function CheckpointModal() {
-  const { checkpoint, closeCheckpointModal } = useStore((s) => ({
+  const { checkpoint, closeCheckpointModal } = useStore(useShallow((s) => ({
     checkpoint: s.checkpoint,
     closeCheckpointModal: s.closeCheckpointModal,
-  }))
+  })))
   const { approve, reject } = useDeck()
 
   const [feedback, setFeedback] = useState('')

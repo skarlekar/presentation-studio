@@ -3,6 +3,7 @@
  * Shows all main slides and appendix section; right panel opens on slide selection.
  */
 import { useStore } from '@/store'
+import { useShallow } from 'zustand/react/shallow'
 import { useDeck } from '@/hooks/useDeck'
 import AgentStatusBadge from '@/components/AgentStatusBadge'
 import SlideCard from '@/components/SlideCard'
@@ -10,14 +11,14 @@ import SlideEditor from '@/components/SlideEditor'
 import AppendixSection from '@/components/AppendixSection'
 
 export default function GalleryPage() {
-  const { envelope, status, currentStage, progressPct, error, selectedSlideId } = useStore((s) => ({
+  const { envelope, status, currentStage, progressPct, error, selectedSlideId } = useStore(useShallow((s) => ({
     envelope: s.envelope,
     status: s.status,
     currentStage: s.currentStage,
     progressPct: s.progressPct,
     error: s.error,
     selectedSlideId: s.selectedSlideId,
-  }))
+  })))
   const { approve_and_export } = useDeck()
 
   const isComplete = status === 'completed' || status === 'complete'

@@ -2,6 +2,7 @@
  * TabBar — 3-tab navigation: Intake | Gallery | Export
  */
 import { useStore } from '@/store'
+import { useShallow } from 'zustand/react/shallow'
 import type { Tab } from '@/types'
 import clsx from 'clsx'
 
@@ -19,12 +20,12 @@ const TABS: TabConfig[] = [
 ]
 
 export default function TabBar() {
-  const { activeTab, setTab, envelope, status } = useStore((s) => ({
+  const { activeTab, setTab, envelope, status } = useStore(useShallow((s) => ({
     activeTab: s.activeTab,
     setTab: s.setTab,
     envelope: s.envelope,
     status: s.status,
-  }))
+  })))
 
   const isComplete = status === 'completed' || status === 'complete'
 
