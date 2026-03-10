@@ -17,6 +17,7 @@ from pathlib import Path
 
 from deepagents import create_deep_agent
 from langgraph.checkpoint.sqlite import SqliteSaver
+import sqlite3
 
 from backend.config.settings import get_settings
 from backend.agents.insight_extractor import INSIGHT_EXTRACTOR_CONFIG
@@ -70,10 +71,17 @@ Return the complete DeckEnvelope JSON as your final response, including:
 
 
 def get_checkpointer() -> SqliteSaver:
-    """Get or create the SQLite checkpointer for pipeline state persistence."""
+    """Get or create the SQLite checkpointer for pipeline state persistence.
+
+    Creates a direct sqlite3 connection — from_conn_string() is a context manager
+    and cannot be used directly as a checkpointer argument.
+    """
     db_path = Path(settings.deepagents_checkpoint_db)
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    return SqliteSaver.from_conn_string(str(db_path))
+    conn = sqlite3.connect(str(db_path), check_same_thread=False)
+    checkpointer = SqliteSaver(conn)
+    checkpointer.setup()  # Create checkpoint tables if they don't exist
+    return checkpointer
 
 
 def resolve_model_string(api_key: str | None = None) -> str:
