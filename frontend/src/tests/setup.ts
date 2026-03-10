@@ -8,7 +8,7 @@ afterEach(() => {
 })
 
 // Mock fetch globally
-global.fetch = vi.fn()
+(globalThis as any).fetch = vi.fn()
 
 // Mock import.meta.env
 Object.defineProperty(import.meta, 'env', {

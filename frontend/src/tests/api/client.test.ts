@@ -14,7 +14,7 @@ import {
 import { mockEnvelope, mockStatusCompleted } from '@/tests/fixtures'
 
 const mockFetch = vi.fn()
-global.fetch = mockFetch
+(globalThis as any).fetch = mockFetch
 
 function mockOk(body: unknown, status = 200) {
   mockFetch.mockResolvedValueOnce({
