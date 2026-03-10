@@ -225,7 +225,8 @@ async def run_pipeline(session_id: str, request: DeckRequest) -> None:
         request: The validated DeckRequest driving this pipeline run.
     """
     config = {"configurable": {"thread_id": session_id}}
-    orchestrator = get_orchestrator()
+    # Pass user-supplied API key (used when ANTHROPIC_API_KEY not in env)
+    orchestrator = get_orchestrator(api_key=request.api_key)
     session_svc = get_session_service()
 
     try:

@@ -179,6 +179,8 @@ export interface DeckRequest {
   brand_style_guide?: string | null
   top_messages?: string[] | null
   known_metrics?: string[] | null
+  /** Anthropic API key supplied by the user — only included when server has no env key */
+  api_key?: string | null
 }
 
 export interface GenerateResponse {

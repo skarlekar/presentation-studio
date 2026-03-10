@@ -52,6 +52,12 @@ interface UiSlice {
   } | null
 }
 
+interface ApiKeySlice {
+  apiKey: string | null          // User-supplied Anthropic API key
+  apiKeyConfigured: boolean      // True if key is pre-configured in server env
+  apiKeyChecked: boolean         // True after health check has been performed
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Actions
 // ─────────────────────────────────────────────────────────────────────────────
@@ -76,11 +82,24 @@ interface Actions {
   openCheckpointModal: () => void
   closeCheckpointModal: () => void
   setExportResult: (result: UiSlice['exportResult']) => void
+
+  // API key
+  setApiKey: (key: string) => void
+  setApiKeyStatus: (configured: boolean) => void
+  clearApiKey: () => void
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Store
 // ─────────────────────────────────────────────────────────────────────────────
+
+const initialApiKeySlice: ApiKeySlice = {
+  apiKey: typeof sessionStorage !== 'undefined'
+    ? sessionStorage.getItem('deckstudio_api_key')
+    : null,
+  apiKeyConfigured: false,
+  apiKeyChecked: false,
+}
 
 const initialSessionSlice: SessionSlice = {
   sessionId: null,
@@ -107,11 +126,12 @@ const initialUiSlice: UiSlice = {
   exportResult: null,
 }
 
-export const useStore = create<SessionSlice & DeckSlice & UiSlice & Actions>((set, get) => ({
+export const useStore = create<SessionSlice & DeckSlice & UiSlice & ApiKeySlice & Actions>((set, get) => ({
   // ── Initial state ──────────────────────────────────────────────────────────
   ...initialSessionSlice,
   ...initialDeckSlice,
   ...initialUiSlice,
+  ...initialApiKeySlice,
 
   // ── Session actions ────────────────────────────────────────────────────────
 
@@ -224,6 +244,21 @@ export const useStore = create<SessionSlice & DeckSlice & UiSlice & Actions>((se
   closeCheckpointModal: () => set({ checkpointModalOpen: false }),
 
   setExportResult: (result) => set({ exportResult: result }),
+
+  // ── API key actions ────────────────────────────────────────────────────────
+
+  setApiKey: (key) => {
+    // Store in sessionStorage (cleared on tab close — more secure than localStorage)
+    try { sessionStorage.setItem('deckstudio_api_key', key) } catch { /* ignore */ }
+    set({ apiKey: key })
+  },
+
+  setApiKeyStatus: (configured) => set({ apiKeyConfigured: configured, apiKeyChecked: true }),
+
+  clearApiKey: () => {
+    try { sessionStorage.removeItem('deckstudio_api_key') } catch { /* ignore */ }
+    set({ apiKey: null })
+  },
 }))
 
 // ── Selectors ──────────────────────────────────────────────────────────────────

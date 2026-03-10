@@ -3,7 +3,7 @@ Unit tests for source_material_service.py — text extraction.
 """
 import pytest
 
-from backend.services.source_material_service import (
+from services.source_material_service import (
     extract_text_from_file,
     SourceMaterialError,
     MAX_FILE_SIZE_BYTES,

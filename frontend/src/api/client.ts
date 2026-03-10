@@ -70,6 +70,8 @@ export async function generateDeck(req: DeckRequest): Promise<GenerateResponse> 
   return request<GenerateResponse>('POST', '/api/deck/generate', req)
 }
 
+/** Check server health and whether the API key is pre-configured. */
+
 /** Upload a source material file and start generation. */
 export async function generateDeckWithUpload(
   file: File,
@@ -203,6 +205,12 @@ export async function getDeckHistory(
 
 // ── Health ────────────────────────────────────────────────────────────────────
 
-export async function checkHealth(): Promise<{ status: string; version: string }> {
+export async function checkHealth(): Promise<{
+  status: string
+  version: string
+  api_key_configured: boolean
+  llm_provider: string
+  llm_model: string
+}> {
   return request('GET', '/api/health')
 }

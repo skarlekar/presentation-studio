@@ -7,7 +7,7 @@ These tests are CRITICAL: they verify the core schema enforcement rules
 import json
 import pytest
 
-from backend.agents.quality_validator import validate_deck_data, ALLOWED_LAYOUTS, ALLOWED_VISUAL_TYPES
+from agents.quality_validator import validate_deck_data, ALLOWED_LAYOUTS, ALLOWED_VISUAL_TYPES
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

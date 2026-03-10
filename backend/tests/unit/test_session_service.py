@@ -4,8 +4,8 @@ Unit tests for SessionService — in-memory session store with HITL checkpoints.
 import asyncio
 import pytest
 
-from backend.services.session_service import SessionService
-from backend.schemas.output import PipelineStatus, CheckpointStatus
+from services.session_service import SessionService
+from schemas.output import PipelineStatus, CheckpointStatus
 
 
 @pytest.fixture

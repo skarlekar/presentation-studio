@@ -4,11 +4,11 @@ Unit tests for Pydantic schemas — input.py and output.py.
 import pytest
 from pydantic import ValidationError
 
-from backend.schemas.input import (
+from schemas.input import (
     DeckRequest, DeckType, DecisionInformAsk,
     CheckpointApproveRequest, CheckpointRejectRequest, SlideUpdateRequest,
 )
-from backend.schemas.output import (
+from schemas.output import (
     Slide, EvidenceItem, EvidenceType, LayoutType, VisualType,
     IllustrationPrompt, Visual, Violation, ValidationReport,
     ViolationSeverity,
@@ -157,7 +157,7 @@ class TestSlideSchema:
         with pytest.raises(ValidationError, match="3"):
             Slide(**valid_slide(
                 evidence=[
-                    {"type": "metric", "detail": "A"},
+                    {"type": "metric", "detail": "Detail item A"},
                     {"type": "metric", "detail": "B"},
                     {"type": "metric", "detail": "C"},
                     {"type": "metric", "detail": "D"},  # 4th — should fail
@@ -167,9 +167,9 @@ class TestSlideSchema:
     def test_evidence_3_is_ok(self):
         slide = Slide(**valid_slide(
             evidence=[
-                {"type": "metric", "detail": "A"},
-                {"type": "quote", "detail": "B"},
-                {"type": "benchmark", "detail": "C"},
+                {"type": "metric", "detail": "Detail item A"},
+                {"type": "quote", "detail": "Detail item B"},
+                {"type": "benchmark", "detail": "Detail item C"},
             ]
         ))
         assert len(slide.evidence) == 3
@@ -184,8 +184,8 @@ class TestSlideSchema:
                 "layout": "invalid-layout",
                 "illustration_prompt": {
                     "type": "data-chart",
-                    "description": "desc",
-                    "alt_text": "alt",
+                    "description": "Description of the visual element",
+                    "alt_text": "Alt text description",
                 },
             }))
 
@@ -195,8 +195,8 @@ class TestSlideSchema:
                 "layout": "two-column",
                 "illustration_prompt": {
                     "type": "invalid-type",
-                    "description": "desc",
-                    "alt_text": "alt",
+                    "description": "Description of the visual element",
+                    "alt_text": "Alt text description",
                 },
             }))
 
@@ -206,8 +206,8 @@ class TestSlideSchema:
                 "layout": layout,
                 "illustration_prompt": {
                     "type": "data-chart",
-                    "description": "desc",
-                    "alt_text": "alt",
+                    "description": "Description of the visual element",
+                    "alt_text": "Alt text description",
                 },
             }))
             assert slide.visual.layout == layout
@@ -218,8 +218,8 @@ class TestSlideSchema:
                 "layout": "two-column",
                 "illustration_prompt": {
                     "type": vtype,
-                    "description": "desc",
-                    "alt_text": "alt",
+                    "description": "Description of the visual element",
+                    "alt_text": "Alt text description",
                 },
             }))
             assert slide.visual.illustration_prompt.type == vtype

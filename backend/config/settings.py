@@ -113,7 +113,7 @@ class Settings(BaseSettings):
     )
 
     anthropic_model: str = Field(
-        default="claude-3-5-sonnet-20241022",
+        default="claude-opus-4-5",
         description="Anthropic model identifier passed to the ChatAnthropic client.",
     )
 
@@ -151,16 +151,20 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_api_keys(self) -> "Settings":
-        """Ensure the active provider has a key configured."""
-        if self.llm_provider == "anthropic" and not self.anthropic_api_key:
-            raise ValueError(
-                "ANTHROPIC_API_KEY must be set when LLM_PROVIDER='anthropic'."
-            )
-        if self.llm_provider == "openai" and not self.openai_api_key:
-            raise ValueError(
-                "OPENAI_API_KEY must be set when LLM_PROVIDER='openai'."
-            )
+        """API keys are optional at startup — can be supplied per-request from the frontend.
+
+        This allows the app to start without pre-configured keys; the frontend
+        will detect the missing key via the /api/health endpoint and prompt the user.
+        """
+        # Keys are intentionally optional — validated at request time if missing
         return self
+
+    @property
+    def api_key_configured(self) -> bool:
+        """True if the active provider's API key is available in environment."""
+        if self.llm_provider == "anthropic":
+            return bool(self.anthropic_api_key)
+        return bool(self.openai_api_key)
 
     # ─────────────────────────────────────────
     # AGENT PIPELINE

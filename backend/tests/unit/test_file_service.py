@@ -6,7 +6,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from backend.services.file_service import save_deck, load_deck, list_versions, _slugify
+from services.file_service import save_deck, load_deck, list_versions, _slugify
 
 
 class TestSlugify:
@@ -36,10 +36,10 @@ class TestSaveDeck:
             lambda: MagicMock(export_dir=str(tmp_path)),
         )
         # Import here to get patched version
-        from backend.services import file_service as fs
+        from services import file_service as fs
         fs.settings = MagicMock(export_dir=str(tmp_path))
 
-        from backend.schemas.output import DeckEnvelope, PipelineStatus, Deck, Appendix
+        from schemas.output import DeckEnvelope, PipelineStatus, Deck, Appendix
         envelope = DeckEnvelope(
             session_id="sess-001",
             status=PipelineStatus.COMPLETED,
@@ -65,13 +65,13 @@ class TestSaveDeck:
 
     @pytest.mark.asyncio
     async def test_increments_version(self, tmp_path, monkeypatch):
-        from backend.services import file_service as fs
+        from services import file_service as fs
         fs.settings = MagicMock(export_dir=str(tmp_path))
 
         # Create a fake existing file to simulate v1
         (tmp_path / "test-deck_20260310_180000_v1.json").write_text("{}")
 
-        from backend.schemas.output import DeckEnvelope, PipelineStatus, Deck, Appendix
+        from schemas.output import DeckEnvelope, PipelineStatus, Deck, Appendix
         envelope = DeckEnvelope(
             session_id="s",
             status=PipelineStatus.COMPLETED,
@@ -104,7 +104,7 @@ class TestLoadDeck:
 class TestListVersions:
     @pytest.mark.asyncio
     async def test_returns_empty_for_no_files(self, tmp_path, monkeypatch):
-        from backend.services import file_service as fs
+        from services import file_service as fs
         fs.settings = MagicMock(export_dir=str(tmp_path))
         result = await list_versions("sess-001")
         assert result == []

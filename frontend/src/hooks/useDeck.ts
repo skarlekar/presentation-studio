@@ -14,6 +14,7 @@ import {
   updateSlide,
   approveDeck,
   exportDeck,
+  checkHealth,
   ApiError,
 } from '@/api/client'
 import type { DeckRequest, CheckpointApproveRequest } from '@/types'
@@ -21,12 +22,28 @@ import type { DeckRequest, CheckpointApproveRequest } from '@/types'
 export function useDeck() {
   const store = useStore()
 
+  // ── Health check (called once on first render from AppShell) ───────────────
+
+  const checkApiKeyStatus = useCallback(async () => {
+    try {
+      const health = await checkHealth()
+      store.setApiKeyStatus(health.api_key_configured)
+    } catch {
+      // Backend not reachable — assume key not configured, let user supply it
+      store.setApiKeyStatus(false)
+    }
+  }, [store])
+
   // ── Start pipeline ──────────────────────────────────────────────────────────
 
   const startGeneration = useCallback(async (req: DeckRequest) => {
     try {
-      const resp = await generateDeck(req)
-      store.startSession(resp.session_id, req)
+      // Attach user-supplied API key if the server doesn't have one configured
+      const reqWithKey: DeckRequest = store.apiKey && !store.apiKeyConfigured
+        ? { ...req, api_key: store.apiKey }
+        : req
+      const resp = await generateDeck(reqWithKey)
+      store.startSession(resp.session_id, reqWithKey)
     } catch (err) {
       store.updateFromStatus({
         session_id: '',
@@ -158,6 +175,9 @@ export function useDeck() {
     isPolling: store.isPolling,
     envelope: store.envelope,
     exportResult: store.exportResult,
+    apiKey: store.apiKey,
+    apiKeyConfigured: store.apiKeyConfigured,
+    apiKeyChecked: store.apiKeyChecked,
 
     // Actions
     startGeneration,
@@ -166,5 +186,6 @@ export function useDeck() {
     editSlide,
     approve_and_export,
     reset,
+    checkApiKeyStatus,
   }
 }

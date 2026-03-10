@@ -1,8 +1,11 @@
 /**
- * AppShell — top-level layout: header + TabBar + page content + CheckpointModal overlay.
+ * AppShell — top-level layout: header + API key banner + TabBar + page content + CheckpointModal.
  */
+import { useEffect } from 'react'
 import { useStore } from '@/store'
+import { useDeck } from '@/hooks/useDeck'
 import TabBar from '@/components/TabBar'
+import ApiKeyBanner from '@/components/ApiKeyBanner'
 import IntakePage from '@/pages/IntakePage'
 import GalleryPage from '@/pages/GalleryPage'
 import ExportPage from '@/pages/ExportPage'
@@ -11,6 +14,12 @@ import CheckpointModal from '@/components/CheckpointModal'
 export default function AppShell() {
   const activeTab = useStore((s) => s.activeTab)
   const checkpointModalOpen = useStore((s) => s.checkpointModalOpen)
+  const { checkApiKeyStatus } = useDeck()
+
+  // Check server API key status once on mount
+  useEffect(() => {
+    checkApiKeyStatus()
+  }, [checkApiKeyStatus])
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -26,6 +35,9 @@ export default function AppShell() {
           AI-powered executive presentation builder
         </span>
       </header>
+
+      {/* ── API key banner (shown when server key not configured) ── */}
+      <ApiKeyBanner />
 
       {/* ── Tab bar ── */}
       <TabBar />

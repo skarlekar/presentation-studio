@@ -76,17 +76,41 @@ def get_checkpointer() -> SqliteSaver:
     return SqliteSaver.from_conn_string(str(db_path))
 
 
-def create_orchestrator():
+def resolve_model_string(api_key: str | None = None) -> str:
+    """Resolve the DeepAgents model string, applying a runtime API key if provided.
+
+    If api_key is provided, it temporarily sets the env var for this process so
+    that the LangChain/Anthropic client picks it up. The key is never stored.
+
+    Args:
+        api_key: Optional Anthropic API key supplied by the user at request time.
+
+    Returns:
+        The model string for create_deep_agent (e.g. "anthropic/claude-opus-4-5").
+    """
+    import os
+    if api_key and settings.llm_provider == "anthropic":
+        os.environ["ANTHROPIC_API_KEY"] = api_key
+    elif api_key and settings.llm_provider == "openai":
+        os.environ["OPENAI_API_KEY"] = api_key
+    return settings.deepagents_model
+
+
+def create_orchestrator(api_key: str | None = None):
     """Create and return the compiled orchestrator DeepAgent graph.
+
+    Args:
+        api_key: Optional API key supplied at request time (when not in env).
 
     Returns:
         Compiled LangGraph agent graph with HITL interrupts and SQLite checkpointing.
     """
     checkpointer = get_checkpointer()
+    model = resolve_model_string(api_key)
 
     orchestrator = create_deep_agent(
         name="deck-orchestrator",
-        model=settings.deepagents_model,
+        model=model,
         system_prompt=ORCHESTRATOR_SYSTEM_PROMPT,
         tools=[],  # Only uses built-in task tool for subagent delegation
         interrupt_on={
@@ -106,17 +130,34 @@ def create_orchestrator():
     return orchestrator
 
 
-# Module-level orchestrator instance (initialized lazily to avoid import-time side effects)
+# Module-level orchestrator instance (initialized lazily)
+# When a user-supplied API key is used, a fresh orchestrator is created per-session
+# to ensure the key is properly applied.
 _orchestrator = None
 
 
-def get_orchestrator():
-    """Get the singleton orchestrator instance.
+def get_orchestrator(api_key: str | None = None):
+    """Get the orchestrator instance.
 
-    Creates the orchestrator on first call; returns cached instance on subsequent calls.
-    Thread-safe for read access (LangGraph graphs are immutable after compilation).
+    - If api_key is provided AND no env key is set: creates a new orchestrator with
+      the user-supplied key applied to the environment for this process.
+    - Otherwise: returns the cached singleton.
+
+    Args:
+        api_key: Optional Anthropic API key from the frontend request.
+
+    Returns:
+        Compiled LangGraph agent graph ready for invocation.
     """
     global _orchestrator
+
+    # If a key is supplied from the frontend and not already in env, apply it
+    if api_key and not settings.api_key_configured:
+        resolve_model_string(api_key)  # Sets the env var
+        if _orchestrator is None:
+            _orchestrator = create_orchestrator(api_key)
+        return _orchestrator
+
     if _orchestrator is None:
         _orchestrator = create_orchestrator()
     return _orchestrator

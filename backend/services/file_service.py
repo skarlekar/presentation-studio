@@ -23,7 +23,8 @@ def _slugify(text: str) -> str:
     text = text.lower().strip()
     text = re.sub(r"[^\w\s-]", "", text)
     text = re.sub(r"[\s_-]+", "-", text)
-    return text[:50].rstrip("-")
+    result = text[:50].rstrip("-")
+    return result if result else "deck"
 
 
 def _get_export_dir() -> Path:

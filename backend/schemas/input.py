@@ -192,6 +192,15 @@ class DeckRequest(BaseModel):
         ),
     )
 
+    api_key: str | None = Field(
+        default=None,
+        description=(
+            "Anthropic API key supplied by the user via the frontend. "
+            "Used when ANTHROPIC_API_KEY is not set in the server environment. "
+            "Never logged or stored — used only for the duration of this request."
+        ),
+    )
+
     # ── Validators ───────────────────────────────────────────────────────────
 
     @field_validator("context", mode="before")

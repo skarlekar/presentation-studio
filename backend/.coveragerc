@@ -1,0 +1,19 @@
+[run]
+source = .
+omit =
+    tests/*
+    */__init__.py
+    agents/orchestrator.py
+    agents/insight_extractor.py
+    agents/deck_architect.py
+    agents/slide_generator.py
+    agents/appendix_agent.py
+    main.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    if TYPE_CHECKING:
+    raise NotImplementedError
+    if __name__ == .__main__.:

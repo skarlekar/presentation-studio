@@ -9,12 +9,12 @@ Do not merge — regenerate the agent using compose_system_prompt().
 """
 import pytest
 
-from backend.prompts import PRESENTATION_ARCHITECT_PROMPT, compose_system_prompt
-from backend.agents.insight_extractor import INSIGHT_EXTRACTOR_SYSTEM_PROMPT
-from backend.agents.deck_architect import DECK_ARCHITECT_SYSTEM_PROMPT
-from backend.agents.slide_generator import SLIDE_GENERATOR_SYSTEM_PROMPT
-from backend.agents.appendix_agent import APPENDIX_AGENT_SYSTEM_PROMPT
-from backend.agents.quality_validator import QUALITY_VALIDATOR_SYSTEM_PROMPT
+from prompts import PRESENTATION_ARCHITECT_PROMPT, compose_system_prompt
+from agents.insight_extractor import INSIGHT_EXTRACTOR_SYSTEM_PROMPT
+from agents.deck_architect import DECK_ARCHITECT_SYSTEM_PROMPT
+from agents.slide_generator import SLIDE_GENERATOR_SYSTEM_PROMPT
+from agents.appendix_agent import APPENDIX_AGENT_SYSTEM_PROMPT
+from agents.quality_validator import QUALITY_VALIDATOR_SYSTEM_PROMPT
 
 
 # ── Canonical prompt sanity check ─────────────────────────────────────────────
@@ -28,7 +28,7 @@ CANONICAL_KEY_PHRASES = [
     "Archetype",
     # STEP 3 markers
     "STEP 3",
-    "Narrative Arc",
+    "Narrative Story Arc",
     # STEP 9 markers
     "STEP 9",
     # HARD RULES section
