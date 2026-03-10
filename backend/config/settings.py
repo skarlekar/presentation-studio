@@ -113,7 +113,7 @@ class Settings(BaseSettings):
     )
 
     anthropic_model: str = Field(
-        default="claude-opus-4-5",
+        default="claude-sonnet-4-5",
         description="Anthropic model identifier passed to the ChatAnthropic client.",
     )
 
