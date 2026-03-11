@@ -55,11 +55,15 @@ async def save_deck(session_id: str, deck_envelope: DeckEnvelope) -> dict:
     slug = _slugify(title)
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
-    # Auto-increment version
-    existing = list(export_dir.glob(f"{slug}_*_v*.json"))
+    # Prefix with run_id when present for easy identification
+    run_id = getattr(deck_envelope, "run_id", None) or ""
+    run_prefix = f"{run_id}-" if run_id else ""
+
+    # Auto-increment version (search with or without prefix to avoid duplicates)
+    existing = list(export_dir.glob(f"*{slug}_*_v*.json"))
     version = len(existing) + 1
 
-    filename = f"{slug}_{timestamp}_v{version}.json"
+    filename = f"{run_prefix}{slug}_{timestamp}_v{version}.json"
     filepath = export_dir / filename
 
     deck_json = deck_envelope.model_dump_json(indent=2)

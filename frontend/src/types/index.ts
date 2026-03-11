@@ -117,6 +117,7 @@ export interface Deck {
 
 export interface DeckEnvelope {
   session_id: string
+  run_id?: string | null
   status: PipelineStatus
   deck: Deck | null
   error?: string | null
@@ -163,6 +164,7 @@ export interface AgentStep {
 
 export interface SessionStatusResponse {
   session_id: string
+  run_id?: string | null
   status: PipelineStatus
   current_stage?: string | null
   progress_pct?: number
@@ -194,6 +196,7 @@ export interface DeckRequest {
   known_metrics?: string[] | null
   /** Anthropic API key supplied by the user — only included when server has no env key */
   api_key?: string | null
+  run_id?: string | null
 }
 
 export interface GenerateResponse {

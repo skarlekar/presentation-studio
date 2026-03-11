@@ -113,6 +113,7 @@ def _session_to_status_response(session: Session) -> SessionStatusResponse:
 
     return SessionStatusResponse(
         session_id=session.session_id,
+        run_id=getattr(session, "run_id", None),
         status=session.status,
         current_stage=session.current_stage,
         slides_generated=slides_generated,

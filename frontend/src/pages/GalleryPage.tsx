@@ -72,6 +72,7 @@ export default function GalleryPage() {
             const { envelope: env, sessionId: sid } = await loadExport(entry.filename)
             upsertLibraryEntry({
               sessionId: sid,
+              runId: (env as any).run_id ?? null,
               title: entry.title,
               deckType: entry.deck_type,
               status: 'completed',
@@ -180,6 +181,12 @@ export default function GalleryPage() {
                       : 'bg-white border-gray-200 hover:border-brand-200 hover:bg-brand-50/40',
                   ].join(' ')}
                 >
+                  {/* Run ID badge */}
+                  {entry.runId && (
+                    <span className={`text-[10px] font-mono font-bold tracking-wide ${isActive ? 'text-brand-500' : 'text-gray-400'}`}>
+                      {entry.runId}
+                    </span>
+                  )}
                   <p className={`text-xs font-semibold truncate leading-snug ${isActive ? 'text-brand-700' : 'text-gray-800'}`}>
                     {isLoading ? '⏳ Loading…' : entry.title}
                   </p>

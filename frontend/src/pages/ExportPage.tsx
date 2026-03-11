@@ -17,11 +17,12 @@ interface VersionEntry {
 }
 
 export default function ExportPage() {
-  const { envelope, exportResult, sessionId, error } = useStore(useShallow((s) => ({
+  const { envelope, exportResult, sessionId, error, runId } = useStore(useShallow((s) => ({
     envelope: s.envelope,
     exportResult: s.exportResult,
     sessionId: s.sessionId,
     error: s.error,
+    runId: s.runId,
   })))
   const { approve_and_export } = useDeck()
   const [versions, setVersions] = useState<VersionEntry[]>([])
@@ -79,6 +80,12 @@ export default function ExportPage() {
       <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
         <div className="flex items-start justify-between gap-4">
           <div>
+            {runId && (
+              <div className="inline-flex items-center gap-1.5 mb-2 px-2.5 py-1 rounded-lg bg-brand-50 border border-brand-200">
+                <span className="text-xs text-brand-500">Run</span>
+                <span className="text-xs font-bold text-brand-700 font-mono tracking-wide">{runId}</span>
+              </div>
+            )}
             <h2 className="font-bold text-gray-900 text-lg">{deck.title}</h2>
             <div className="flex gap-2 mt-2 flex-wrap">
               <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded">{deck.type}</span>

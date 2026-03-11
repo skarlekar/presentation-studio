@@ -52,6 +52,7 @@ export default function IntakePage() {
     isPolling: s.isPolling,
   })))
   const { startGeneration, reset } = useDeck()
+  const runId = useStore(s => s.runId)
 
   const isRunning = isPolling || status === 'running' || status === 'awaiting_approval'
   const isComplete = status === 'completed' || status === 'complete'
@@ -127,9 +128,14 @@ export default function IntakePage() {
           )}
           {isComplete && (
             <div className="mt-3 bg-green-50 border border-green-200 rounded-xl px-4 py-3 flex items-center justify-between gap-4">
-              <p className="text-sm text-green-700 font-medium">
-                ✓ Deck complete — view it in the <strong>Gallery</strong> tab.
-              </p>
+              <div>
+                <p className="text-sm text-green-700 font-medium">
+                  ✓ Deck complete — view it in the <strong>Gallery</strong> tab.
+                </p>
+                {runId && (
+                  <p className="text-xs text-green-600 font-mono mt-0.5">Run ID: {runId}</p>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={reset}

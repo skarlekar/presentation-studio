@@ -27,6 +27,7 @@ import type {
 
 export interface DeckLibraryEntry {
   sessionId: string
+  runId: string | null          // Short run ID for traceability
   title: string
   deckType: string
   status: PipelineStatus | 'completed'
@@ -47,6 +48,7 @@ interface LibrarySlice {
 
 interface SessionSlice {
   sessionId: string | null
+  runId: string | null          // Short human-readable run ID e.g. "DS-2603-8F4A"
   status: PipelineStatus | null
   currentStage: string | null
   progressPct: number
@@ -88,7 +90,7 @@ interface ApiKeySlice {
 
 interface Actions {
   // Session
-  startSession: (sessionId: string, request: DeckRequest) => void
+  startSession: (sessionId: string, request: DeckRequest, runId?: string) => void
   setCompletedSession: (sessionId: string, envelope: DeckEnvelope) => void
   updateFromStatus: (status: SessionStatusResponse) => void
   setPolling: (polling: boolean) => void
@@ -137,6 +139,7 @@ const initialApiKeySlice: ApiKeySlice = {
 
 const initialSessionSlice: SessionSlice = {
   sessionId: null,
+  runId: null,
   status: null,
   currentStage: null,
   progressPct: 0,
@@ -169,10 +172,12 @@ function envelopeToLibraryEntry(
   sessionId: string,
   envelope: DeckEnvelope,
   exportedAt?: string,
+  runId?: string | null,
 ): DeckLibraryEntry {
   const deck = envelope.deck
   return {
     sessionId,
+    runId: runId ?? (envelope as any).run_id ?? null,
     title: deck?.title ?? 'Untitled Deck',
     deckType: deck?.type ?? '',
     status: 'completed',
@@ -220,7 +225,8 @@ export const useStore = create<SessionSlice & DeckSlice & LibrarySlice & UiSlice
         }),
 
       setCompletedSession: (sessionId, envelope) => {
-        const entry = envelopeToLibraryEntry(sessionId, envelope)
+        const { runId: existingRunId } = get()
+        const entry = envelopeToLibraryEntry(sessionId, envelope, undefined, existingRunId)
         set((s) => ({
           sessionId,
           status: 'completed',
@@ -242,6 +248,7 @@ export const useStore = create<SessionSlice & DeckSlice & LibrarySlice & UiSlice
 
         const updates: Partial<SessionSlice & UiSlice> = {
           status: statusResp.status as PipelineStatus,
+          runId: (statusResp as any).run_id ?? get().runId ?? null,
           currentStage: statusResp.current_stage ?? null,
           progressPct: statusResp.progress_pct ?? 0,
           checkpoint,
@@ -267,7 +274,8 @@ export const useStore = create<SessionSlice & DeckSlice & LibrarySlice & UiSlice
 
       setEnvelope: (envelope) => {
         const { sessionId } = get()
-        const entry = sessionId ? envelopeToLibraryEntry(sessionId, envelope) : null
+        const { runId } = get()
+      const entry = sessionId ? envelopeToLibraryEntry(sessionId, envelope, undefined, runId) : null
         set((s) => ({
           envelope,
           status: 'completed',
@@ -377,6 +385,7 @@ export const useStore = create<SessionSlice & DeckSlice & LibrarySlice & UiSlice
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         sessionId: state.sessionId,
+        runId: state.runId,
         envelope: state.envelope,
         status: state.status === 'running' ? null : state.status,
         lastRequest: state.lastRequest,

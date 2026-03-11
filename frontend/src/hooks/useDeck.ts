@@ -54,10 +54,19 @@ export function useDeck() {
     const { apiKey: key, apiKeyConfigured: configured, startSession, updateFromStatus } =
       useStore.getState()
     try {
-      const reqWithKey: DeckRequest =
-        key && !configured ? { ...req, api_key: key } : req
+      // Generate a short, human-readable run ID at intake time
+      // Format: DS-YYMM-XXXX (e.g. DS-2603-8F4A)
+      const now = new Date()
+      const yymm = String(now.getFullYear()).slice(2) + String(now.getMonth() + 1).padStart(2, '0')
+      const rand = Math.floor(Math.random() * 0xFFFF).toString(16).toUpperCase().padStart(4, '0')
+      const runId = `DS-${yymm}-${rand}`
+
+      const reqWithKey: DeckRequest = {
+        ...(key && !configured ? { ...req, api_key: key } : req),
+        run_id: runId,
+      }
       const resp = await generateDeck(reqWithKey)
-      startSession(resp.session_id, reqWithKey)
+      startSession(resp.session_id, reqWithKey, runId)
     } catch (err) {
       updateFromStatus({
         session_id: '',

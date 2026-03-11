@@ -454,6 +454,12 @@ class DeckEnvelope(BaseModel):
         description="Generation session identifier.",
     )
 
+    run_id: str | None = Field(
+        default=None,
+        description="Short human-readable run identifier (e.g. 'DS-2603-8F4A'). "
+                    "Set by the client at intake and echoed through the full lifecycle.",
+    )
+
     status: PipelineStatus = Field(
         ...,
         description="Current pipeline status.",
@@ -580,6 +586,11 @@ class SessionStatusResponse(BaseModel):
     """
 
     session_id: str = Field(..., description="Session identifier.")
+
+    run_id: str | None = Field(
+        default=None,
+        description="Short human-readable run identifier (e.g. 'DS-2603-8F4A').",
+    )
 
     status: PipelineStatus = Field(..., description="Current pipeline status.")
 

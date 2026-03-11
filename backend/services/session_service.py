@@ -53,6 +53,7 @@ class Session:
     checkpoints: list = field(default_factory=list)
     deck: Optional[DeckEnvelope] = None
     error: Optional[str] = None
+    run_id: Optional[str] = None
     quality_retry_count: int = 0
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
@@ -91,6 +92,7 @@ class SessionService:
                 session_id=session_id,
                 status=PipelineStatus.PENDING,
                 request_data=request_data,
+                run_id=request_data.get("run_id") if isinstance(request_data, dict) else None,
             )
             self._sessions[session_id] = session
             return session
@@ -196,6 +198,9 @@ class SessionService:
         async with self._lock:
             session = self._sessions.get(session_id)
             if session:
+                # Stamp the session run_id onto the envelope for traceability
+                if session.run_id and not deck.run_id:
+                    deck.run_id = session.run_id
                 session.deck = deck
                 session.status = PipelineStatus.COMPLETED
                 session.updated_at = datetime.utcnow()
