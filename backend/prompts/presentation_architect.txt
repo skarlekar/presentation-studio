@@ -154,9 +154,20 @@ Each slide must answer:
 
 Each slide must include ALL of the following:
 
-TITLE — A conclusion statement, not a topic label.
-GOOD: "Event-driven ingestion reduces integration time by 40%"
-BAD: "Architecture Overview"
+TITLE — Strict rules. All four must be satisfied simultaneously:
+  1. WORD LIMIT: Maximum 6 words. Absolutely no exceptions.
+  2. STYLE: Action-oriented (starts with a verb) OR a declarative statement.
+     Never a generic label like "Overview", "Introduction", or "Update".
+  3. FORMAT: Title Case. No period at the end.
+  4. SUBSTANCE: Must state a conclusion or outcome — not just a topic.
+
+  GOOD: "Target the Enterprise Software Market"       (5 words, verb-led)
+  GOOD: "Q3 Revenue Surges by 12%"                   (5 words, declarative)
+  GOOD: "Agents Eliminate Manual Security Gaps"       (5 words, verb-led)
+  BAD:  "An Overview of Our Strategy for Entering the Enterprise Market in Q4"
+        (14 words, generic, no conclusion)
+  BAD:  "A Detailed Look at Our Financial Performance and Profit Growth in Q3"
+        (13 words, topic label, not action-oriented)
 
 OBJECTIVE — One sentence stating what the slide must make the audience believe.
 
@@ -293,7 +304,7 @@ FIELD RULES:
 • "source_material_provided" → Boolean. Set to true if SOURCE_MATERIAL was provided, false if the deck was generated from CONTEXT alone.
 • "slide_id" → Zero-padded string. Main deck: "01"–"NN". Appendix: "A01", "A02", etc.
 • "section" → Must match one of the narrative arc sections from STEP 3.
-• "title" → Must be a conclusion statement, never a topic label (see STEP 5).
+• "title" → Maximum 6 words. Title Case. No trailing period. Action-oriented (starts with a verb) or declarative. Must state a conclusion or outcome — never a topic label or generic phrase. See STEP 5 for full rules and examples. Violating the 6-word limit is a schema validation error.
 • "objective" → Single sentence. States what this slide must make the audience believe.
 • "metaphor" → Exactly 1 sentence. Plain-language analogy derived from THIS slide's specific content. Must be understandable by a layman with no domain expertise. Required on every slide including appendix. Never generic. Violating the 1-sentence limit is a schema validation error.
 • "key_points" → Array of strings. Max 5 items (see STEP 13).

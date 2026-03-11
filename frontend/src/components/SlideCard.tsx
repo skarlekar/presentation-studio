@@ -51,30 +51,32 @@ export default function SlideCard({ slide, isAppendix = false }: Props) {
       </div>
 
       {/* Title */}
-      <h3 className="text-sm font-semibold text-gray-900 leading-snug mb-2 line-clamp-2">
+      <h3 className="text-sm font-semibold text-gray-900 leading-snug mb-2">
         {slide.title}
       </h3>
 
-      {/* Key points preview */}
+      {/* Key points — all of them, fully visible */}
       {slide.key_points.length > 0 && (
-        <ul className="text-xs text-gray-500 space-y-0.5 mb-2">
-          {slide.key_points.slice(0, 3).map((pt, i) => (
+        <ul className="text-xs text-gray-600 space-y-1 mb-2">
+          {slide.key_points.map((pt, i) => (
             <li key={i} className="flex gap-1.5 items-start">
-              <span className="mt-0.5 text-gray-300">•</span>
-              <span className="line-clamp-1">{pt}</span>
+              <span className="mt-0.5 text-gray-300 shrink-0">•</span>
+              <span>{pt}</span>
             </li>
           ))}
-          {slide.key_points.length > 3 && (
-            <li className="text-gray-400 pl-3.5">
-              +{slide.key_points.length - 3} more
-            </li>
-          )}
         </ul>
+      )}
+
+      {/* Takeaway */}
+      {slide.takeaway && (
+        <p className="text-xs font-medium text-gray-700 border-t border-gray-100 pt-2 mt-2">
+          🎯 {slide.takeaway}
+        </p>
       )}
 
       {/* Metaphor */}
       {slide.metaphor && (
-        <p className="text-xs text-indigo-600 italic line-clamp-2 border-t border-gray-100 pt-2 mt-2">
+        <p className="text-xs text-indigo-600 italic border-t border-gray-100 pt-2 mt-2">
           💡 {slide.metaphor}
         </p>
       )}

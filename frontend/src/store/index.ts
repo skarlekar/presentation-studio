@@ -8,6 +8,7 @@
  */
 
 import { create } from 'zustand'
+import { persist, createJSONStorage } from 'zustand/middleware'
 import type {
   AgentStep,
   DeckRequest,
@@ -130,7 +131,9 @@ const initialUiSlice: UiSlice = {
   exportResult: null,
 }
 
-export const useStore = create<SessionSlice & DeckSlice & UiSlice & ApiKeySlice & Actions>((set, get) => ({
+export const useStore = create<SessionSlice & DeckSlice & UiSlice & ApiKeySlice & Actions>()(
+  persist(
+    (set, get) => ({
   // ── Initial state ──────────────────────────────────────────────────────────
   ...initialSessionSlice,
   ...initialDeckSlice,
@@ -274,7 +277,21 @@ export const useStore = create<SessionSlice & DeckSlice & UiSlice & ApiKeySlice 
     try { sessionStorage.removeItem('deckstudio_api_key') } catch { /* ignore */ }
     set({ apiKey: null })
   },
-}))
+}),
+    {
+      name: 'deckstudio-session',
+      storage: createJSONStorage(() => localStorage),
+      // Only persist what matters across page refreshes — not polling/UI state
+      partialize: (state) => ({
+        sessionId: state.sessionId,
+        envelope: state.envelope,
+        status: state.status === 'running' ? null : state.status,  // don't restore mid-run
+        lastRequest: state.lastRequest,
+        agentSteps: state.agentSteps,
+      }),
+    }
+  )
+)
 
 // ── Selectors ──────────────────────────────────────────────────────────────────
 

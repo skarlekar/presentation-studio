@@ -21,7 +21,7 @@ Your job is to validate the generated deck against ALL schema constraints:
 1. metaphor: exactly 1 sentence on every slide (including appendix)
 2. key_points: max 5 items per slide
 3. evidence: max 3 items per slide
-4. title: must be a conclusion statement (should contain a verb and an outcome)
+4. title: max 6 words; action-oriented or declarative; Title Case; no trailing period; no generic labels
 5. All required fields present and non-empty
 6. slide_id format: main slides "01"-"NN", appendix "A01", "A02" etc.
 7. visual.layout: must be one of the 8 allowed layout types
@@ -171,6 +171,17 @@ def validate_deck_data(deck_json: str, session_id: str = "") -> ValidationReport
                     f"{field_name} is required and must not be empty",
                 ))
 
+        # ── title word count ────────────────────────────────────────────────
+        title_val = slide.get("title", "")
+        if isinstance(title_val, str) and title_val.strip():
+            word_count = len(title_val.strip().split())
+            if word_count > 6:
+                violations.append(_make_violation(
+                    sid, "title",
+                    f"title must be 6 words or fewer; found {word_count} words",
+                    title_val,
+                ))
+
         # ── visual.layout ────────────────────────────────────────────────────
         visual = slide.get("visual", {})
         if not isinstance(visual, dict):
@@ -213,7 +224,7 @@ def validate_deck(deck_json: str) -> dict:
     - metaphor: exactly 1 sentence on every slide
     - key_points: max 5 items per slide
     - evidence: max 3 items per slide
-    - title, objective, takeaway, section: required and non-empty
+    - title: required, non-empty, and max 6 words
     - visual.layout: must be one of 8 allowed layout types
     - illustration_prompt.type: must be one of 8 allowed visual types
 

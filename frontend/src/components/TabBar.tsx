@@ -38,7 +38,6 @@ export default function TabBar() {
       <div className="flex gap-0 max-w-screen-xl mx-auto">
         {TABS.map((tab) => {
           const isDisabled =
-            (tab.id === 'gallery' && !envelope && !isComplete) ||
             (tab.id === 'export' && !isComplete)
 
           return (

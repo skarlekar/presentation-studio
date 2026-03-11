@@ -232,6 +232,134 @@ def _extract_json_from_content(content: str) -> Optional[dict]:
     return None
 
 
+def _adapt_raw_deck(data: dict, session_id: str = "") -> Optional[DeckEnvelope]:
+    """Adapt whatever JSON the LLM produced into a valid DeckEnvelope.
+
+    The LLM often emits a simplified structure (title, slides with basic fields).
+    This function fills in defaults for every missing required field so Pydantic
+    validation succeeds even when the LLM omits schema-required fields.
+    """
+    from backend.schemas.output import (
+        Slide, Visual, IllustrationPrompt, Appendix, Deck,
+        LayoutType, VisualType, EvidenceType,
+    )
+
+    def _default_visual() -> dict:
+        return {
+            "layout": "two-column",
+            "illustration_prompt": {
+                "type": "framework",
+                "description": "Supporting visual for this slide.",
+                "alt_text": "Slide visual",
+            },
+        }
+
+    def _adapt_slide(raw: dict, index: int) -> dict:
+        """Map a raw slide dict to the full Slide schema with defaults."""
+        slide_id = raw.get("slide_id") or raw.get("id") or f"{index + 1:02d}"
+        # Normalise slide_id: must match ^A?\d{{2,3}}$
+        import re as _re
+        if not _re.match(r"^A?\d{2,3}$", str(slide_id)):
+            slide_id = f"{index + 1:02d}"
+
+        # Extract content text from various common LLM keys
+        content_text = (
+            raw.get("content") or raw.get("body") or raw.get("narrative") or ""
+        )
+        bullets = raw.get("bullets") or raw.get("key_points") or raw.get("talking_points") or []
+        if isinstance(bullets, str):
+            bullets = [b.strip() for b in bullets.split("\n") if b.strip()]
+
+        title = raw.get("title") or f"Slide {index + 1}"
+        section = raw.get("section") or (
+            "Setup" if index == 0 else "Insight" if index < 4 else "Resolution"
+        )
+        objective = raw.get("objective") or content_text[:200] or title
+        metaphor = raw.get("metaphor") or f"{title}."
+        takeaway = raw.get("takeaway") or raw.get("key_message") or title
+        speaker_notes = raw.get("speaker_notes") or raw.get("notes") or content_text
+
+        visual = raw.get("visual") or _default_visual()
+        if isinstance(visual, dict):
+            if "layout" not in visual:
+                visual["layout"] = "two-column"
+            if "illustration_prompt" not in visual:
+                visual["illustration_prompt"] = {
+                    "type": "framework",
+                    "description": content_text[:200] or "Supporting visual",
+                    "alt_text": title,
+                }
+            elif isinstance(visual["illustration_prompt"], dict):
+                ip = visual["illustration_prompt"]
+                ip.setdefault("type", "framework")
+                ip.setdefault("description", "Supporting visual")
+                ip.setdefault("alt_text", title)
+
+        return {
+            "slide_id": str(slide_id),
+            "section": section,
+            "title": title,
+            "objective": objective,
+            "metaphor": metaphor,
+            "key_points": bullets[:5],
+            "evidence": [],
+            "visual": visual,
+            "takeaway": takeaway,
+            "speaker_notes": speaker_notes,
+            "assets_needed": raw.get("assets_needed", []),
+        }
+
+    def _adapt_appendix_slide(raw: dict, index: int) -> dict:
+        adapted = _adapt_slide(raw, index)
+        # Appendix slides use A01, A02... IDs
+        adapted["slide_id"] = raw.get("slide_id") or f"A{index + 1:02d}"
+        adapted["section"] = "Appendix"
+        return adapted
+
+    try:
+        deck_raw = data.get("deck") if isinstance(data, dict) else None
+        if not deck_raw or not isinstance(deck_raw, dict):
+            return None
+
+        # Adapt slides
+        raw_slides = deck_raw.get("slides", [])
+        adapted_slides = [_adapt_slide(s, i) for i, s in enumerate(raw_slides) if isinstance(s, dict)]
+
+        # Appendix slides: LLM may use appendix_slides or appendix.slides
+        raw_appendix = deck_raw.get("appendix_slides") or deck_raw.get("appendix", {})
+        if isinstance(raw_appendix, dict):
+            raw_appendix = raw_appendix.get("slides", [])
+        if not isinstance(raw_appendix, list):
+            raw_appendix = []
+        adapted_appendix = [_adapt_appendix_slide(s, i) for i, s in enumerate(raw_appendix) if isinstance(s, dict)]
+
+        adapted_deck = {
+            "title": deck_raw.get("title") or "Untitled Deck",
+            "type": deck_raw.get("type") or deck_raw.get("deck_type") or "Strategy Deck",
+            "audience": deck_raw.get("audience") or "Executive",
+            "tone": deck_raw.get("tone") or "Professional",
+            "decision_inform_ask": deck_raw.get("decision_inform_ask") or "Inform",
+            "context": deck_raw.get("context") or "",
+            "source_material_provided": bool(deck_raw.get("source_material_provided", False)),
+            "total_slides": len(adapted_slides),
+            "slides": adapted_slides,
+            "appendix": {"slides": adapted_appendix},
+        }
+
+        envelope = {
+            "session_id": session_id or data.get("session_id", ""),
+            "status": "completed",
+            "deck": adapted_deck,
+            "created_at": data.get("created_at") or datetime.utcnow().isoformat(),
+        }
+
+        return DeckEnvelope.model_validate(envelope)
+
+    except Exception as e:
+        logger.warning("_adapt_raw_deck failed: %s", e)
+        return None
+
+
 def _extract_deck_from_result(result: Any, session_id: str = "") -> Optional[DeckEnvelope]:
     """Extract a DeckEnvelope from the orchestrator result.
 
@@ -287,20 +415,10 @@ def _extract_deck_from_result(result: Any, session_id: str = "") -> Optional[Dec
                     # Deck has many required fields the LLM may omit — try patching defaults
                     deck_data = data.get("deck") if isinstance(data, dict) else None
                     if deck_data and isinstance(deck_data, dict):
-                        deck_data.setdefault("type", "Strategy Deck")
-                        deck_data.setdefault("audience", "Executive")
-                        deck_data.setdefault("tone", "Professional")
-                        deck_data.setdefault("decision_inform_ask", "Inform")
-                        deck_data.setdefault("context", "")
-                        deck_data.setdefault("source_material_provided", False)
-                        deck_data.setdefault("total_slides", len(deck_data.get("slides", [])))
-                        # Normalise appendix: LLM may use appendix_slides instead of appendix.slides
-                        if "appendix_slides" in deck_data and "appendix" not in deck_data:
-                            deck_data["appendix"] = {"slides": deck_data.pop("appendix_slides")}
-                        try:
-                            return _fixup(DeckEnvelope.model_validate(data))
-                        except Exception as ve2:
-                            logger.warning("DeckEnvelope validation still failed after patching: %s", ve2)
+                        # Use the full adapter which fills defaults for every required field
+                        adapted = _adapt_raw_deck(data, session_id)
+                        if adapted:
+                            return adapted
 
         # Try direct dict validation as last resort
         try:
@@ -358,17 +476,41 @@ def _process_stream_events(events: list, session_id: str, session_svc_sync_steps
                     })
 
 
-def _parse_stream_event(event: dict) -> list[dict]:
+def _extract_messages_from_update(state_update: Any) -> list:
+    """Safely extract messages from a LangGraph state update.
+
+    stream_mode="updates" can yield plain dicts OR LangGraph wrapper objects
+    (Overwrite, etc.). This function handles both cases.
+    """
+    # Plain dict (most common)
+    if isinstance(state_update, dict):
+        msgs = state_update.get("messages", [])
+        return msgs if isinstance(msgs, list) else []
+
+    # LangGraph Overwrite / custom wrapper — try common attribute patterns
+    for attr in ("messages", "__value__", "value"):
+        val = getattr(state_update, attr, None)
+        if val is not None:
+            if isinstance(val, list):
+                return val
+            if isinstance(val, dict):
+                msgs = val.get("messages", [])
+                return msgs if isinstance(msgs, list) else []
+
+    return []
+
+
+def _parse_stream_event(event: Any) -> list[dict]:
     """Extract agent start/complete actions from a single LangGraph stream event.
 
     Returns a list of action dicts: {"action": "start"|"complete", "name"?: str, "output"?: str}
     """
+    if not isinstance(event, dict):
+        return []   # Ignore non-dict top-level events (e.g. bare Overwrite objects)
+
     actions = []
     for _node_name, state_update in event.items():
-        if not isinstance(state_update, dict):
-            continue
-        messages = state_update.get("messages", [])
-        for msg in messages:
+        for msg in _extract_messages_from_update(state_update):
             # AIMessage with tool_calls → an agent is being called (start)
             tool_calls = getattr(msg, "tool_calls", None)
             if tool_calls:
@@ -473,6 +615,53 @@ async def run_pipeline(session_id: str, request: DeckRequest) -> None:
         if current_agent:
             await session_svc.complete_agent_step(session_id, current_agent)
 
+        # ── Direct quality validation fallback ──────────────────────────────
+        # If quality_validator errored (LLM forgot the required 'description' arg),
+        # run the pure-Python validation directly from the agent_steps output.
+        session_for_qv = await session_svc.get_session(session_id)
+        if session_for_qv:
+            qv_step = next(
+                (s for s in session_for_qv.agent_steps if s.get("name") == "quality_validator"),
+                None,
+            )
+            sg_step = next(
+                (s for s in session_for_qv.agent_steps if s.get("name") == "slide_generator"),
+                None,
+            )
+            if (
+                qv_step
+                and "description: Field required" in (qv_step.get("output_summary") or "")
+                and sg_step
+                and sg_step.get("output_full")
+            ):
+                try:
+                    from backend.agents.quality_validator import validate_deck_data
+                    # Extract deck JSON from slide_generator output
+                    sg_output = sg_step["output_full"]
+                    import re as _re
+                    fence_m = _re.search(r"```(?:json)?\s*(\{.*?\})\s*```", sg_output, _re.DOTALL)
+                    if fence_m:
+                        deck_json_str = fence_m.group(1)
+                    else:
+                        brace_start = sg_output.find("{")
+                        deck_json_str = sg_output[brace_start:] if brace_start != -1 else ""
+                    if deck_json_str:
+                        report = validate_deck_data(deck_json_str, session_id)
+                        summary = (
+                            f"✅ Quality validation passed ({report.total_slides_checked} slides checked)"
+                            if report.passed
+                            else f"⚠️ {len(report.violations)} violation(s) found across {report.total_slides_checked} slides"
+                        )
+                        await session_svc.complete_agent_step(
+                            session_id, "quality_validator", output_full=summary
+                        )
+                        logger.info(
+                            "Direct quality validation completed for session %s (passed=%s)",
+                            session_id, report.passed,
+                        )
+                except Exception as qv_exc:
+                    logger.warning("Direct quality validation fallback failed: %s", qv_exc)
+
         # ── Extract deck from final state ───────────────────────────────────
         state = await asyncio.to_thread(orchestrator.get_state, config)
 
@@ -496,6 +685,30 @@ async def run_pipeline(session_id: str, request: DeckRequest) -> None:
                 logger.error("Pipeline returned no deck for session %s", session_id)
 
     except Exception as exc:
+        # On recursion limit: try to recover the deck from checkpoint message history
+        # before marking the session as failed.
+        try:
+            from langgraph.errors import GraphRecursionError
+            if isinstance(exc, GraphRecursionError):
+                logger.warning(
+                    "Pipeline hit recursion limit for session %s — attempting deck recovery",
+                    session_id,
+                )
+                state = await asyncio.to_thread(orchestrator.get_state, config)
+                result_values = getattr(state, "values", {})
+                deck = _extract_deck_from_result(result_values, session_id)
+                if deck:
+                    if current_agent:
+                        await session_svc.complete_agent_step(session_id, current_agent)
+                    await session_svc.set_deck(session_id, deck)
+                    logger.info(
+                        "Pipeline recovered from recursion limit for session %s",
+                        session_id,
+                    )
+                    return
+        except Exception as recovery_exc:
+            logger.warning("Recursion-limit recovery attempt failed: %s", recovery_exc)
+
         logger.exception("Pipeline error for session %s: %s", session_id, exc)
         session = await session_svc.get_session(session_id)
         if session:
@@ -1128,4 +1341,164 @@ async def get_deck_history(
         "session_id": session_id,
         "total_versions": len(versions),
         "versions": versions,
+    }
+
+
+@router.get(
+    "/exports/all",
+    status_code=200,
+    summary="List all exported deck versions across all sessions",
+)
+async def list_all_exports() -> dict:
+    """Return a flat list of every exported JSON file in the exports directory.
+
+    Used by the Gallery tab to populate a 'Previous runs' view when no active
+    session exists in memory (e.g. after a page refresh or server restart).
+
+    Each entry includes: session_id, filename, title, saved_at, size_bytes, version.
+    """
+    import json as _json
+    from pathlib import Path
+
+    export_dir = Path(settings.export_dir)
+    entries = []
+
+    if export_dir.exists():
+        for path in sorted(export_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+            try:
+                stat = path.stat()
+                # Parse just enough of the file to get title and session_id
+                with open(path) as fh:
+                    data = _json.load(fh)
+                deck = data.get("deck", {})
+                entries.append({
+                    "filename": path.name,
+                    "session_id": data.get("session_id", ""),
+                    "title": deck.get("title", "Untitled"),
+                    "deck_type": deck.get("type", ""),
+                    "total_slides": deck.get("total_slides", len(deck.get("slides", []))),
+                    "appendix_slides": len((deck.get("appendix") or {}).get("slides", [])),
+                    "saved_at": data.get("created_at", ""),
+                    "size_bytes": stat.st_size,
+                })
+            except Exception:
+                continue  # skip malformed files
+
+    return {
+        "total": len(entries),
+        "exports": entries,
+    }
+
+
+@router.get(
+    "/exports/load/{filename}",
+    status_code=200,
+    summary="Load a specific exported deck JSON by filename",
+)
+async def load_export(filename: str) -> JSONResponse:
+    """Load a previously exported deck JSON from disk and restore it as an active session.
+
+    The filename must match a file in the configured export directory.
+    Returns the full DeckEnvelope after creating an in-memory session for it.
+    """
+    import json as _json
+    from pathlib import Path
+
+    # Sanitise: only allow simple filenames, no path traversal
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename.")
+
+    export_path = Path(settings.export_dir) / filename
+    if not export_path.exists():
+        raise HTTPException(status_code=404, detail=f"Export file '{filename}' not found.")
+
+    try:
+        with open(export_path) as fh:
+            data = _json.load(fh)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Could not parse export file: {exc}")
+
+    # Restore as a live session
+    session_svc = get_session_service()
+    preferred_id = data.get("session_id")
+
+    try:
+        deck = DeckEnvelope.model_validate(data)
+    except Exception:
+        deck = _adapt_raw_deck(data, preferred_id or "")
+        if not deck:
+            raise HTTPException(status_code=422, detail="File does not contain a valid DeckEnvelope.")
+
+    session = await session_svc.create_session({"loaded_from": filename})
+    session_id = session.session_id
+
+    if preferred_id and preferred_id != session_id:
+        async with session_svc._lock:
+            session_svc._sessions[preferred_id] = session
+        session_id = preferred_id
+
+    await session_svc.set_deck(session_id, deck)
+
+    return JSONResponse(
+        content=_json.loads(deck.model_dump_json()),
+        status_code=200,
+        headers={"X-Session-Id": session_id},
+    )
+
+
+@router.post(
+    "/restore",
+    status_code=status.HTTP_201_CREATED,
+    summary="[Admin] Restore a completed session from a pre-saved recovery JSON file",
+)
+async def restore_session(
+    body: dict = Body(...),
+) -> dict:
+    """Restore a completed deck session from a recovery JSON object.
+
+    Accepts a full DeckEnvelope-compatible JSON dict (as produced by the recovery
+    script) and creates an in-memory completed session. Returns the new session_id.
+
+    Body fields:
+      - session_id (optional): preferred session ID to restore under
+      - deck: the deck data
+    """
+    from pathlib import Path
+
+    session_svc = get_session_service()
+
+    # Allow caller to request a specific session_id (for UI continuity)
+    preferred_id = body.get("session_id")
+
+    # Try to parse as DeckEnvelope
+    try:
+        deck = DeckEnvelope.model_validate(body)
+    except Exception:
+        # Fall back to adapter
+        deck = _adapt_raw_deck(body, preferred_id or "")
+        if not deck:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Could not parse body as a valid DeckEnvelope.",
+            )
+
+    # Create a new session in COMPLETED state
+    session = await session_svc.create_session({"restored": True})
+    session_id = session.session_id
+
+    # If a preferred_id was given, swap sessions (best-effort: add under both keys)
+    if preferred_id and preferred_id != session_id:
+        async with session_svc._lock:
+            session_svc._sessions[preferred_id] = session
+        session_id = preferred_id
+
+    await session_svc.set_deck(session_id, deck)
+
+    return {
+        "session_id": session_id,
+        "status": "restored",
+        "slides": len(deck.deck.slides) if deck.deck else 0,
+        "appendix_slides": len(deck.deck.appendix.slides) if deck.deck and deck.deck.appendix else 0,
+        "title": deck.deck.title if deck.deck else None,
+        "message": f"Session restored. View at /api/deck/{session_id}",
     }

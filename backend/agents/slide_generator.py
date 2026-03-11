@@ -22,7 +22,7 @@ CRITICAL RULES (enforced by schema validation — violations will trigger regene
 1. Every slide MUST have a metaphor — exactly 1 sentence, plain language, from that slide's specific content
 2. key_points: maximum 5 items per slide
 3. evidence: maximum 3 items per slide
-4. title: must be a conclusion statement (verb + outcome), never a topic label
+4. title: follow TITLE rules from STEP 5 exactly — max 6 words, action-oriented or declarative, Title Case, no period, never a generic label
 5. Slide 2 MUST be the Executive Summary (STEP 4) with exactly 5 bullets
 6. Follow narrative arc proportions from the provided outline (Setup ~20%, Insight ~50%, Resolution ~30%)
 7. Every slide needs a visual plan with layout and illustration_prompt
@@ -55,7 +55,7 @@ def generate_slides(slides_json: str) -> dict:
                     - metaphor: exactly 1 sentence
                     - key_points: max 5 items
                     - evidence: max 3 items
-                    - title: conclusion statement (verb + outcome)
+                    - title: max 6 words (STEP 5 rules)
                     - visual.layout: one of 8 allowed layouts
                     - visual.illustration_prompt.type: one of 8 allowed visual types
 

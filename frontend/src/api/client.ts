@@ -227,3 +227,41 @@ export async function checkHealth(): Promise<{
 }> {
   return request('GET', '/api/health')
 }
+
+interface ExportEntry {
+  filename: string
+  session_id: string
+  title: string
+  deck_type: string
+  total_slides: number
+  appendix_slides: number
+  saved_at: string
+  size_bytes: number
+}
+
+export async function listAllExports(): Promise<{
+  total: number
+  exports: Array<{
+    filename: string
+    session_id: string
+    title: string
+    deck_type: string
+    total_slides: number
+    appendix_slides: number
+    saved_at: string
+    size_bytes: number
+  }>
+}> {
+  return request<{ total: number; exports: ExportEntry[] }>('GET', '/api/deck/exports/all')
+}
+
+export async function loadExport(filename: string): Promise<{ envelope: DeckEnvelope; sessionId: string }> {
+  const resp = await fetch(`${BASE_URL}/api/deck/exports/load/${encodeURIComponent(filename)}`)
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}))
+    throw new ApiError(resp.status, err.detail ?? resp.statusText)
+  }
+  const sessionId = resp.headers.get('X-Session-Id') ?? ''
+  const envelope: DeckEnvelope = await resp.json()
+  return { envelope, sessionId }
+}

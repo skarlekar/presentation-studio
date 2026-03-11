@@ -24,6 +24,7 @@ The main deck slides have already been generated and approved. Now you must:
 4. Appendix slide_ids use "A01", "A02", etc.
 5. Every appendix slide MUST have a metaphor — exactly 1 sentence
 6. section field must be "Appendix" for all appendix slides
+7. title: follow TITLE rules from STEP 5 exactly — max 6 words, action-oriented or declarative, Title Case, no period
 
 Allowed layout values: title | two-column | chart | timeline | table | quote | full-bleed visual | framework diagram
 Allowed illustration_prompt.type values: process-diagram | architecture-diagram | data-chart | comparison-table | timeline | framework | matrix | before-after
