@@ -37,8 +37,7 @@ export default function GalleryPage() {
     selectedSlideId: s.selectedSlideId,
   })))
   const { approve_and_export } = useDeck()
-  const setEnvelope = useStore(s => s.setEnvelope)
-  const startSession = useStore(s => s.startSession)
+  const setCompletedSession = useStore(s => s.setCompletedSession)
 
   const [prevRuns, setPrevRuns] = useState<ExportEntry[]>([])
   const [loadingPrev, setLoadingPrev] = useState(false)
@@ -63,9 +62,8 @@ export default function GalleryPage() {
     setLoadingFile(entry.filename)
     try {
       const { envelope: loaded, sessionId } = await loadExport(entry.filename)
-      // Restore into store as a completed session
-      startSession(sessionId, {} as any)
-      setEnvelope(loaded)
+      // Restore as a completed session — no polling, status already completed
+      setCompletedSession(sessionId, loaded)
     } catch (err) {
       console.error('[GalleryPage] loadExport error:', err)
     } finally {

@@ -155,16 +155,37 @@ export function useDeck() {
   // ── Export ──────────────────────────────────────────────────────────────────
 
   const approve_and_export = useCallback(async () => {
-    const { sessionId: sid, setExportResult, setTab } = useStore.getState()
-    if (!sid) return null
+    const { sessionId: sid, envelope, setExportResult, setTab, setError } = useStore.getState()
+    if (!sid) {
+      setError('No active session — please reload the deck from the Gallery tab.')
+      return null
+    }
     try {
-      await approveDeck(sid)
-      const result = await exportDeck(sid)
+      // If the session no longer exists on the backend (e.g. after a server restart),
+      // re-register it from the in-memory envelope before exporting.
+      let activeSid = sid
+      try {
+        await approveDeck(activeSid)
+      } catch (approveErr) {
+        if (approveErr instanceof ApiError && approveErr.status === 404 && envelope) {
+          // Session gone from backend — restore it then retry
+          const { restoreSession } = await import('@/api/client')
+          const restored = await restoreSession({ session_id: sid, ...JSON.parse(JSON.stringify(envelope)) })
+          activeSid = restored.session_id
+          useStore.getState().setSessionId(activeSid)
+          await approveDeck(activeSid)
+        } else {
+          throw approveErr
+        }
+      }
+      const result = await exportDeck(activeSid)
       setExportResult(result)
       setTab('export')
       return result
     } catch (err) {
+      const msg = err instanceof ApiError ? err.detail : String(err)
       console.error('[useDeck] Export error:', err)
+      useStore.getState().setError(`Export failed: ${msg}`)
       return null
     }
   }, [])

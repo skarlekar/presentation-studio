@@ -239,6 +239,10 @@ interface ExportEntry {
   size_bytes: number
 }
 
+export async function restoreSession(body: Record<string, unknown>): Promise<{ session_id: string; status: string }> {
+  return request('POST', '/api/deck/restore', body)
+}
+
 export async function listAllExports(): Promise<{
   total: number
   exports: Array<{

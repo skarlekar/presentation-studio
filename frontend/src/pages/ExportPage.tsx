@@ -17,10 +17,11 @@ interface VersionEntry {
 }
 
 export default function ExportPage() {
-  const { envelope, exportResult, sessionId } = useStore(useShallow((s) => ({
+  const { envelope, exportResult, sessionId, error } = useStore(useShallow((s) => ({
     envelope: s.envelope,
     exportResult: s.exportResult,
     sessionId: s.sessionId,
+    error: s.error,
   })))
   const { approve_and_export } = useDeck()
   const [versions, setVersions] = useState<VersionEntry[]>([])
@@ -100,6 +101,17 @@ export default function ExportPage() {
             )}
           </button>
         </div>
+
+        {/* Export error */}
+        {error && (
+          <div className="mt-4 bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-start gap-3">
+            <span className="text-xl">❌</span>
+            <div>
+              <p className="text-sm font-semibold text-red-800">Export failed</p>
+              <p className="text-xs text-red-700 mt-0.5">{error}</p>
+            </div>
+          </div>
+        )}
 
         {/* Export result */}
         {exportResult && (

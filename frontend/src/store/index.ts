@@ -68,6 +68,8 @@ interface ApiKeySlice {
 interface Actions {
   // Session
   startSession: (sessionId: string, request: DeckRequest) => void
+  /** Restore an already-completed session without triggering polling. */
+  setCompletedSession: (sessionId: string, envelope: DeckEnvelope) => void
   updateFromStatus: (status: SessionStatusResponse) => void
   setPolling: (polling: boolean) => void
   setEnvelope: (envelope: DeckEnvelope) => void
@@ -86,6 +88,9 @@ interface Actions {
   openCheckpointModal: () => void
   closeCheckpointModal: () => void
   setExportResult: (result: UiSlice['exportResult']) => void
+
+  setError: (error: string | null) => void
+  setSessionId: (sessionId: string) => void
 
   // API key
   setApiKey: (key: string) => void
@@ -158,6 +163,17 @@ export const useStore = create<SessionSlice & DeckSlice & UiSlice & ApiKeySlice 
       exportResult: null,
       activeTab: 'intake',
       agentSteps: [],
+    }),
+
+  setCompletedSession: (sessionId, envelope) =>
+    set({
+      sessionId,
+      status: 'completed',
+      isPolling: false,
+      envelope,
+      error: null,
+      exportResult: null,
+      checkpoint: null,
     }),
 
   updateFromStatus: (statusResp) => {
@@ -262,6 +278,8 @@ export const useStore = create<SessionSlice & DeckSlice & UiSlice & ApiKeySlice 
   closeCheckpointModal: () => set({ checkpointModalOpen: false }),
 
   setExportResult: (result) => set({ exportResult: result }),
+  setError: (error) => set({ error }),
+  setSessionId: (sessionId) => set({ sessionId }),
 
   // ── API key actions ────────────────────────────────────────────────────────
 
