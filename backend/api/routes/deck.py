@@ -15,6 +15,8 @@ Endpoints:
 import asyncio
 import json
 import logging
+import queue as stdlib_queue
+import threading
 from datetime import datetime
 from typing import Any, Optional
 
@@ -279,8 +281,26 @@ def _extract_deck_from_result(result: Any, session_id: str = "") -> Optional[Dec
             if data:
                 try:
                     return _fixup(DeckEnvelope.model_validate(data))
-                except Exception:
-                    pass  # Not a DeckEnvelope — keep scanning
+                except Exception as ve:
+                    logger.debug("DeckEnvelope validation failed: %s | data keys: %s",
+                                 ve, list(data.keys()) if isinstance(data, dict) else type(data))
+                    # Deck has many required fields the LLM may omit — try patching defaults
+                    deck_data = data.get("deck") if isinstance(data, dict) else None
+                    if deck_data and isinstance(deck_data, dict):
+                        deck_data.setdefault("type", "Strategy Deck")
+                        deck_data.setdefault("audience", "Executive")
+                        deck_data.setdefault("tone", "Professional")
+                        deck_data.setdefault("decision_inform_ask", "Inform")
+                        deck_data.setdefault("context", "")
+                        deck_data.setdefault("source_material_provided", False)
+                        deck_data.setdefault("total_slides", len(deck_data.get("slides", [])))
+                        # Normalise appendix: LLM may use appendix_slides instead of appendix.slides
+                        if "appendix_slides" in deck_data and "appendix" not in deck_data:
+                            deck_data["appendix"] = {"slides": deck_data.pop("appendix_slides")}
+                        try:
+                            return _fixup(DeckEnvelope.model_validate(data))
+                        except Exception as ve2:
+                            logger.warning("DeckEnvelope validation still failed after patching: %s", ve2)
 
         # Try direct dict validation as last resort
         try:
@@ -338,15 +358,48 @@ def _process_stream_events(events: list, session_id: str, session_svc_sync_steps
                     })
 
 
+def _parse_stream_event(event: dict) -> list[dict]:
+    """Extract agent start/complete actions from a single LangGraph stream event.
+
+    Returns a list of action dicts: {"action": "start"|"complete", "name"?: str, "output"?: str}
+    """
+    actions = []
+    for _node_name, state_update in event.items():
+        if not isinstance(state_update, dict):
+            continue
+        messages = state_update.get("messages", [])
+        for msg in messages:
+            # AIMessage with tool_calls → an agent is being called (start)
+            tool_calls = getattr(msg, "tool_calls", None)
+            if tool_calls:
+                for tc in (tool_calls if isinstance(tool_calls, list) else []):
+                    name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", None)
+                    args = tc.get("args", {}) if isinstance(tc, dict) else getattr(tc, "args", {})
+                    if name == "task":
+                        agent_name = args.get("subagent_type", "")
+                        if agent_name:
+                            actions.append({"action": "start", "name": agent_name})
+
+            # ToolMessage → the running agent just completed
+            msg_type = getattr(msg, "type", None)
+            if msg_type == "tool":
+                content = getattr(msg, "content", "")
+                if isinstance(content, list):
+                    content = " ".join(
+                        b.get("text", "") if isinstance(b, dict) else str(b)
+                        for b in content
+                    )
+                actions.append({"action": "complete", "output": str(content)[:5000] if content else None})
+    return actions
+
+
 async def run_pipeline(session_id: str, request: DeckRequest) -> None:
-    """Run the DeepAgents pipeline in the background with per-agent progress tracking.
+    """Run the DeepAgents pipeline with real-time per-agent progress tracking.
 
-    Uses orchestrator.stream() with stream_mode="updates" to capture per-agent
-    start/complete events and update the session's agent_steps in real time.
-
-    Args:
-        session_id: The session to update throughout the run.
-        request: The validated DeckRequest driving this pipeline run.
+    Uses a thread + queue pattern: the stream runs in a background thread and
+    puts each event into a Queue as it arrives. The async loop drains the queue
+    immediately, updating agent steps after each event — so the UI sees nodes
+    light up as each agent completes, not only at the end.
     """
     config = {"configurable": {"thread_id": session_id}}
     orchestrator = get_orchestrator(api_key=request.api_key)
@@ -358,63 +411,78 @@ async def run_pipeline(session_id: str, request: DeckRequest) -> None:
 
         input_msg = format_deck_request_message(request)
 
-        # Stream events from the orchestrator to track per-agent progress
-        # Collect events in a thread, then process them
-        sync_steps: list[dict] = []
+        # ── Real-time streaming via thread + queue ──────────────────────────
+        event_q: stdlib_queue.Queue = stdlib_queue.Queue()
+        stream_exc: list[Exception] = []
 
-        def _run_stream():
-            events = list(orchestrator.stream(
-                {"messages": [{"role": "user", "content": input_msg}]},
-                config,
-                stream_mode="updates",
-            ))
-            _process_stream_events(events, session_id, sync_steps)
-            return events
+        def _stream_thread():
+            try:
+                for evt in orchestrator.stream(
+                    {"messages": [{"role": "user", "content": input_msg}]},
+                    config,
+                    stream_mode="updates",
+                ):
+                    event_q.put(("event", evt))
+            except Exception as e:
+                stream_exc.append(e)
+            finally:
+                event_q.put(("done", None))
 
-        _events = await asyncio.to_thread(_run_stream)
+        t = threading.Thread(target=_stream_thread, daemon=True)
+        t.start()
 
-        # Apply agent step updates from the collected sync_steps
-        current_running_agent = None
-        for step_action in sync_steps:
-            if step_action["action"] == "start":
-                agent_name = step_action["name"]
-                # If there's a previously running agent with no explicit complete, complete it
-                if current_running_agent and current_running_agent != agent_name:
-                    await session_svc.complete_agent_step(session_id, current_running_agent)
-                await session_svc.start_agent_step(session_id, agent_name)
-                current_running_agent = agent_name
-                # Also update current_stage for the progress bar
-                await session_svc.update_status(
-                    session_id, PipelineStatus.RUNNING, current_stage=agent_name
-                )
-            elif step_action["action"] == "complete":
-                if current_running_agent:
-                    await session_svc.complete_agent_step(
-                        session_id, current_running_agent, output_full=step_action.get("output")
+        current_agent: str | None = None
+
+        while True:
+            try:
+                kind, payload = event_q.get_nowait()
+            except stdlib_queue.Empty:
+                await asyncio.sleep(0.05)   # yield to event loop, check again
+                continue
+
+            if kind == "done":
+                break
+
+            # Process this event immediately — updates are visible on the next poll
+            for action in _parse_stream_event(payload):
+                if action["action"] == "start":
+                    agent_name = action["name"]
+                    if current_agent and current_agent != agent_name:
+                        # Implicitly complete the previous agent
+                        await session_svc.complete_agent_step(session_id, current_agent)
+                    current_agent = agent_name
+                    await session_svc.start_agent_step(session_id, agent_name)
+                    await session_svc.update_status(
+                        session_id, PipelineStatus.RUNNING, current_stage=agent_name
                     )
-                    current_running_agent = None
+                    logger.info("Agent started: %s (session %s)", agent_name, session_id)
 
-        # Complete any still-running agent
-        if current_running_agent:
-            await session_svc.complete_agent_step(session_id, current_running_agent)
+                elif action["action"] == "complete" and current_agent:
+                    await session_svc.complete_agent_step(
+                        session_id, current_agent, output_full=action.get("output")
+                    )
+                    logger.info("Agent completed: %s (session %s)", current_agent, session_id)
+                    current_agent = None
 
-        # Check whether the pipeline paused at a HITL checkpoint
+        t.join(timeout=5)
+
+        if stream_exc:
+            raise stream_exc[0]
+
+        # Finalise any agent still marked running
+        if current_agent:
+            await session_svc.complete_agent_step(session_id, current_agent)
+
+        # ── Extract deck from final state ───────────────────────────────────
         state = await asyncio.to_thread(orchestrator.get_state, config)
 
         if getattr(state, "next", None):
             stage = _extract_stage_from_state(state)
             pending_input = _extract_pending_input(state)
             await session_svc.add_checkpoint(session_id, stage, pending_input)
-            logger.info(
-                "Pipeline paused at HITL checkpoint (stage=%s) for session %s",
-                stage,
-                session_id,
-            )
+            logger.info("Pipeline paused at checkpoint (stage=%s) for session %s", stage, session_id)
         else:
-            # Pipeline completed — extract deck from final state
-            result = await asyncio.to_thread(orchestrator.get_state, config)
-            # get_state returns a StateSnapshot; extract messages from its values
-            result_values = getattr(result, "values", {})
+            result_values = getattr(state, "values", {})
             deck = _extract_deck_from_result(result_values, session_id)
             if deck:
                 await session_svc.set_deck(session_id, deck)
@@ -429,17 +497,12 @@ async def run_pipeline(session_id: str, request: DeckRequest) -> None:
 
     except Exception as exc:
         logger.exception("Pipeline error for session %s: %s", session_id, exc)
-        # Mark any running agent step as failed
         session = await session_svc.get_session(session_id)
         if session:
             for step in session.agent_steps:
                 if step["status"] == "running":
                     await session_svc.fail_agent_step(session_id, step["name"], error=str(exc))
-        await session_svc.update_status(
-            session_id,
-            PipelineStatus.FAILED,
-            error=str(exc),
-        )
+        await session_svc.update_status(session_id, PipelineStatus.FAILED, error=str(exc))
 
 
 async def resume_pipeline(session_id: str) -> None:
