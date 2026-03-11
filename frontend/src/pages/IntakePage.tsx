@@ -126,9 +126,18 @@ export default function IntakePage() {
             />
           )}
           {isComplete && (
-            <p className="text-sm text-green-600 mt-2 font-medium">
-              ✓ Deck generated! Switch to the <strong>Gallery</strong> tab to review it.
-            </p>
+            <div className="mt-3 bg-green-50 border border-green-200 rounded-xl px-4 py-3 flex items-center justify-between gap-4">
+              <p className="text-sm text-green-700 font-medium">
+                ✓ Deck complete — view it in the <strong>Gallery</strong> tab.
+              </p>
+              <button
+                type="button"
+                onClick={reset}
+                className="shrink-0 text-xs font-semibold text-green-700 underline hover:no-underline"
+              >
+                Start New Deck
+              </button>
+            </div>
           )}
           {isFailed && (
             <button
@@ -339,7 +348,7 @@ export default function IntakePage() {
         {/* Submit */}
         <button
           type="submit"
-          disabled={isRunning || isComplete}
+          disabled={isRunning}
           className="w-full py-3.5 bg-brand-600 hover:bg-brand-700 text-white font-semibold rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-sm"
         >
           {isRunning ? (
@@ -348,7 +357,7 @@ export default function IntakePage() {
               Generating deck…
             </>
           ) : isComplete ? (
-            '✓ Deck complete — see Gallery tab'
+            '🚀 Generate New Deck'
           ) : (
             '🚀 Generate Deck'
           )}
