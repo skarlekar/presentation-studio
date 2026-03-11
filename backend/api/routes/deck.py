@@ -218,7 +218,7 @@ def _extract_json_from_content(content: str) -> Optional[dict]:
     return None
 
 
-def _extract_deck_from_result(result: Any) -> Optional[DeckEnvelope]:
+def _extract_deck_from_result(result: Any, session_id: str = "") -> Optional[DeckEnvelope]:
     """Extract a DeckEnvelope from the orchestrator result.
 
     Handles three cases:
@@ -226,29 +226,53 @@ def _extract_deck_from_result(result: Any) -> Optional[DeckEnvelope]:
     2. result is a dict with a "messages" key — parse last message content as JSON
        (plain output mode where the LLM emits a JSON code block)
     3. result is a dict that validates directly as DeckEnvelope
+
+    After parsing, the session_id is always overwritten with the real backend ID.
     """
+    def _fixup(env: DeckEnvelope) -> DeckEnvelope:
+        """Overwrite any LLM-invented session_id with the real backend ID."""
+        if session_id:
+            env.session_id = session_id
+        return env
+
     if isinstance(result, DeckEnvelope):
-        return result
+        return _fixup(result)
 
     if isinstance(result, dict):
         # Walk messages from last to first looking for a parseable DeckEnvelope
         messages = result.get("messages", [])
         for msg in reversed(messages):
-            content = getattr(msg, "content", None) or (
+            raw_content = getattr(msg, "content", None) or (
                 msg.get("content") if isinstance(msg, dict) else None
             )
-            if not content or not isinstance(content, str):
+            if not raw_content:
                 continue
+
+            # Normalise content: AIMessage.content can be a plain string OR a list
+            # of content blocks like [{"type": "text", "text": "..."}, ...].
+            if isinstance(raw_content, list):
+                content = " ".join(
+                    block.get("text", "") if isinstance(block, dict) else str(block)
+                    for block in raw_content
+                )
+            elif isinstance(raw_content, str):
+                content = raw_content
+            else:
+                content = str(raw_content)
+
+            if not content.strip():
+                continue
+
             data = _extract_json_from_content(content)
             if data:
                 try:
-                    return DeckEnvelope.model_validate(data)
+                    return _fixup(DeckEnvelope.model_validate(data))
                 except Exception:
                     pass  # Not a DeckEnvelope — keep scanning
 
         # Try direct dict validation as last resort
         try:
-            return DeckEnvelope.model_validate(result)
+            return _fixup(DeckEnvelope.model_validate(result))
         except Exception:
             pass
 
@@ -304,7 +328,7 @@ async def run_pipeline(session_id: str, request: DeckRequest) -> None:
             )
         else:
             # Pipeline completed — extract and store the deck
-            deck = _extract_deck_from_result(result)
+            deck = _extract_deck_from_result(result, session_id)
             if deck:
                 await session_svc.set_deck(session_id, deck)
                 logger.info("Pipeline completed for session %s", session_id)
@@ -369,7 +393,7 @@ async def resume_pipeline(session_id: str) -> None:
                 session_id,
             )
         else:
-            deck = _extract_deck_from_result(result)
+            deck = _extract_deck_from_result(result, session_id)
             if deck:
                 await session_svc.set_deck(session_id, deck)
                 logger.info("Pipeline completed for session %s", session_id)

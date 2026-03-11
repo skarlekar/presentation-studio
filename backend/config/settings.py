@@ -144,7 +144,7 @@ class Settings(BaseSettings):
     )
 
     llm_timeout_seconds: int = Field(
-        default=120,
+        default=600,
         ge=10,
         description="HTTP timeout in seconds for LLM API calls.",
     )
