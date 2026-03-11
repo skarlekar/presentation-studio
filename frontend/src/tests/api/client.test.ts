@@ -13,8 +13,8 @@ import {
 } from '@/api/client'
 import { mockEnvelope, mockStatusCompleted } from '@/tests/fixtures'
 
-const mockFetch = vi.fn()
-(globalThis as any).fetch = mockFetch
+const { mockFetch } = vi.hoisted(() => ({ mockFetch: vi.fn() }))
+;(globalThis as any).fetch = mockFetch
 
 function mockOk(body: unknown, status = 200) {
   mockFetch.mockResolvedValueOnce({

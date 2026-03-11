@@ -15,7 +15,7 @@ from agents.quality_validator import validate_deck_data, ALLOWED_LAYOUTS, ALLOWE
 def make_slide(
     slide_id="01",
     section="Setup",
-    title="Cloud migration delivers 40% TCO reduction within 18 months",
+    title="Cloud Migration Cuts TCO 40%",
     objective="Make audience understand the financial case.",
     metaphor="Moving to the cloud is like switching from owning a car to using a taxi service.",
     key_points=None,
@@ -164,6 +164,41 @@ class TestValidateDeckData:
         report = validate_deck_data(make_deck_json(slides=[slide]))
         section_violations = [v for v in report.violations if v.field == "section"]
         assert len(section_violations) > 0
+
+    # ── Title word count ──────────────────────────────────────────────────────
+
+    def test_title_over_6_words_produces_violation(self):
+        long_title = "An Overview of Our Strategy for Entering the Enterprise Market in Q4"
+        slide = make_slide(title=long_title)
+        report = validate_deck_data(make_deck_json(slides=[slide]))
+        title_violations = [v for v in report.violations if v.field == "title"]
+        assert len(title_violations) > 0
+        assert "6 words" in title_violations[0].rule
+
+    def test_title_exactly_6_words_passes(self):
+        slide = make_slide(title="Target the Enterprise Software Market Now")
+        report = validate_deck_data(make_deck_json(slides=[slide]))
+        title_violations = [v for v in report.violations if v.field == "title"]
+        assert len(title_violations) == 0
+
+    def test_title_5_words_passes(self):
+        slide = make_slide(title="Cloud Migration Cuts TCO 40%")
+        report = validate_deck_data(make_deck_json(slides=[slide]))
+        title_violations = [v for v in report.violations if v.field == "title"]
+        assert len(title_violations) == 0
+
+    def test_title_7_words_fails(self):
+        slide = make_slide(title="This Title Has Exactly Seven Words Here")
+        report = validate_deck_data(make_deck_json(slides=[slide]))
+        title_violations = [v for v in report.violations if v.field == "title"]
+        assert len(title_violations) > 0
+
+    def test_appendix_title_word_count_also_enforced(self):
+        long_title = "A Very Detailed Look at the Supporting Evidence and Methodology Used"
+        appendix_slide = make_slide(slide_id="A01", section="Appendix", title=long_title)
+        report = validate_deck_data(make_deck_json(appendix_slides=[appendix_slide]))
+        title_violations = [v for v in report.violations if v.field == "title" and v.slide_id == "A01"]
+        assert len(title_violations) > 0
 
     # ── Layout validation ─────────────────────────────────────────────────────
 

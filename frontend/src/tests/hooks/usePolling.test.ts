@@ -63,7 +63,8 @@ describe('usePolling', () => {
   it('polls multiple times while enabled', async () => {
     const onTick = vi.fn().mockResolvedValue(undefined)
     renderHook(() => usePolling({ enabled: true, onTick, intervalMs: 100 }))
-    await act(async () => { vi.advanceTimersByTime(350) })
+    // advanceTimersByTimeAsync flushes promise microtasks between each timer tick
+    await act(async () => { await vi.advanceTimersByTimeAsync(350) })
     expect(onTick).toHaveBeenCalledTimes(3)
   })
 })

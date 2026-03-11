@@ -29,19 +29,23 @@ describe('TabBar', () => {
     expect(intakeTab).toHaveAttribute('aria-selected', 'true')
   })
 
-  it('Gallery and Export are disabled when no deck', () => {
-    render(<TabBar />)
-    const galleryTab = screen.getByRole('tab', { name: /gallery/i })
-    const exportTab = screen.getByRole('tab', { name: /export/i })
-    expect(galleryTab).toBeDisabled()
-    expect(exportTab).toBeDisabled()
-  })
-
-  it('Gallery is enabled when envelope is set', () => {
-    useStore.setState({ envelope: { session_id: 'x', status: 'completed', deck: null, created_at: '' } })
+  it('Gallery is always enabled (shows previous runs when no active deck)', () => {
     render(<TabBar />)
     const galleryTab = screen.getByRole('tab', { name: /gallery/i })
     expect(galleryTab).not.toBeDisabled()
+  })
+
+  it('Export is disabled when no completed deck', () => {
+    render(<TabBar />)
+    const exportTab = screen.getByRole('tab', { name: /export/i })
+    expect(exportTab).toBeDisabled()
+  })
+
+  it('Export is enabled when deck is completed', () => {
+    useStore.setState({ envelope: { session_id: 'x', status: 'completed', deck: null, created_at: '' }, status: 'completed' })
+    render(<TabBar />)
+    const exportTab = screen.getByRole('tab', { name: /export/i })
+    expect(exportTab).not.toBeDisabled()
   })
 
   it('switches tab on click', () => {

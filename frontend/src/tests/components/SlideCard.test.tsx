@@ -22,7 +22,7 @@ describe('SlideCard', () => {
     expect(screen.getByText(/Cloud migration reduces TCO/)).toBeInTheDocument()
   })
 
-  it('renders key points (up to 3 visible)', () => {
+  it('renders all key points in full (no truncation)', () => {
     render(<SlideCard slide={mockSlide} />)
     expect(screen.getByText(/Current on-prem costs/)).toBeInTheDocument()
   })
@@ -30,6 +30,12 @@ describe('SlideCard', () => {
   it('renders metaphor with 💡 prefix', () => {
     render(<SlideCard slide={mockSlide} />)
     expect(screen.getByText(/Moving to the cloud is like/)).toBeInTheDocument()
+  })
+
+  it('renders takeaway field', () => {
+    render(<SlideCard slide={mockSlide} />)
+    // takeaway is rendered with 🎯 prefix
+    expect(screen.getByText(/Migration pays for itself/)).toBeInTheDocument()
   })
 
   it('renders evidence type badges', () => {

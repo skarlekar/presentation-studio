@@ -1,14 +1,11 @@
 import '@testing-library/jest-dom'
-import { afterEach, vi } from 'vitest'
-import { cleanup } from '@testing-library/react'
+import { vi } from 'vitest'
 
-// Cleanup after each test
-afterEach(() => {
-  cleanup()
-})
+// @testing-library/react v16 automatically calls cleanup() after each test
+// in vitest — no manual afterEach needed.
 
 // Mock fetch globally
-(globalThis as any).fetch = vi.fn()
+;(globalThis as any).fetch = vi.fn()
 
 // Mock import.meta.env
 Object.defineProperty(import.meta, 'env', {

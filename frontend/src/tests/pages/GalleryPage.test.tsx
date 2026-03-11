@@ -2,12 +2,15 @@
  * GalleryPage tests.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import GalleryPage from '@/pages/GalleryPage'
 import { useStore } from '@/store'
 import { mockEnvelope } from '@/tests/fixtures'
 
-const mockApproveAndExport = vi.fn().mockResolvedValue(undefined)
+const { mockApproveAndExport } = vi.hoisted(() => ({
+  mockApproveAndExport: vi.fn().mockResolvedValue(undefined),
+}))
+
 vi.mock('@/hooks/useDeck', () => ({
   useDeck: () => ({
     approve_and_export: mockApproveAndExport,
@@ -18,6 +21,17 @@ vi.mock('@/hooks/useDeck', () => ({
     reset: vi.fn(),
   }),
 }))
+
+// Mock the API calls made by GalleryPage
+// listAllExports/loadExport are overridden per-test where needed
+vi.mock('@/api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/client')>()
+  return {
+    ...actual,
+    listAllExports: vi.fn().mockResolvedValue({ total: 0, exports: [] }),
+    loadExport: vi.fn().mockResolvedValue({ envelope: {}, sessionId: 'test-session' }),
+  }
+})
 
 beforeEach(() => {
   useStore.setState({
@@ -33,15 +47,53 @@ beforeEach(() => {
 })
 
 describe('GalleryPage — no deck', () => {
-  it('shows placeholder when no status', () => {
+  it('shows no-active-deck message when no session', async () => {
     render(<GalleryPage />)
-    expect(screen.getByText(/Start a deck from the Intake tab/)).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText(/No active deck/)).toBeInTheDocument()
+    })
+  })
+
+  it('prompts user to start from Intake or reload previous run', async () => {
+    render(<GalleryPage />)
+    await waitFor(() => {
+      expect(screen.getByText(/Start a new deck from the Intake tab/)).toBeInTheDocument()
+    })
   })
 
   it('shows AgentStatusBadge when pipeline is running', () => {
     useStore.setState({ status: 'running', progressPct: 40 })
     render(<GalleryPage />)
     expect(screen.getByText('Running')).toBeInTheDocument()
+  })
+
+  it('shows previous runs list when exports exist', async () => {
+    const { listAllExports } = await import('@/api/client')
+    vi.mocked(listAllExports).mockResolvedValueOnce({
+      total: 1,
+      exports: [{
+        filename: 'test-deck.json',
+        session_id: 'abc-123',
+        title: 'Agentic AI Security',
+        deck_type: 'Strategy Deck',
+        total_slides: 5,
+        appendix_slides: 3,
+        saved_at: '2026-03-11T10:00:00Z',
+        size_bytes: 12345,
+      }],
+    })
+    render(<GalleryPage />)
+    await waitFor(() => {
+      expect(screen.getByText('Agentic AI Security')).toBeInTheDocument()
+    })
+    expect(screen.getByText('Load')).toBeInTheDocument()
+  })
+
+  it('shows "No previous exports" when list is empty', async () => {
+    render(<GalleryPage />)
+    await waitFor(() => {
+      expect(screen.getByText(/No previous exports found/)).toBeInTheDocument()
+    })
   })
 })
 

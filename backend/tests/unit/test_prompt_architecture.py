@@ -38,6 +38,10 @@ CANONICAL_KEY_PHRASES = [
     "evidence",
     "metaphor",
     "exactly 1 sentence",
+    # Title rules (added: 6-word limit)
+    "Maximum 6 words",
+    "Title Case",
+    "schema validation error",
     # Allowed layouts
     "two-column",
     "framework diagram",
