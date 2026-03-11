@@ -9,6 +9,7 @@ interface Props {
   stage?: string | null
   progressPct?: number
   error?: string | null
+  compact?: boolean   // reduced footprint for sidebar use
 }
 
 const STATUS_CONFIG: Record<

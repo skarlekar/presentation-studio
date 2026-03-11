@@ -181,6 +181,7 @@ export function useDeck() {
       const result = await exportDeck(activeSid)
       setExportResult(result)
       setTab('export')
+      useStore.getState().markExported(activeSid)  // flag deck as exported in library
       return result
     } catch (err) {
       const msg = err instanceof ApiError ? err.detail : String(err)

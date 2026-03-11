@@ -1,13 +1,13 @@
 /**
- * GalleryPage — Tab 2: Slide gallery + right-panel editor.
+ * GalleryPage — Tab 2: Deck library sidebar + slide gallery/editor.
  *
- * Three states:
- * 1. Active session with completed deck   → show slides + editor
- * 2. Pipeline running                     → show progress badge
- * 3. No active session                    → show previous exports for reload
+ * Left panel  — Library: all decks (completed + in-progress), sorted newest first.
+ *               Includes remote exports discovered via /api/deck/exports/all.
+ * Right panel — Active deck: slides + editor for the selected deck.
  */
 import { useEffect, useState } from 'react'
 import { useStore } from '@/store'
+import type { DeckLibraryEntry } from '@/store'
 import { useShallow } from 'zustand/react/shallow'
 import { useDeck } from '@/hooks/useDeck'
 import AgentStatusBadge from '@/components/AgentStatusBadge'
@@ -16,183 +16,254 @@ import SlideEditor from '@/components/SlideEditor'
 import AppendixSection from '@/components/AppendixSection'
 import { listAllExports, loadExport } from '@/api/client'
 
-interface ExportEntry {
-  filename: string
-  session_id: string
-  title: string
-  deck_type: string
-  total_slides: number
-  appendix_slides: number
-  saved_at: string
-  size_bytes: number
-}
-
 export default function GalleryPage() {
-  const { envelope, status, currentStage, progressPct, error, selectedSlideId } = useStore(useShallow((s) => ({
+  const {
+    envelope,
+    status,
+    sessionId,
+    currentStage,
+    progressPct,
+    error,
+    selectedSlideId,
+    library,
+  } = useStore(useShallow((s) => ({
     envelope: s.envelope,
     status: s.status,
+    sessionId: s.sessionId,
     currentStage: s.currentStage,
     progressPct: s.progressPct,
     error: s.error,
     selectedSlideId: s.selectedSlideId,
+    library: s.library,
   })))
-  const { approve_and_export } = useDeck()
-  const setCompletedSession = useStore(s => s.setCompletedSession)
 
-  const [prevRuns, setPrevRuns] = useState<ExportEntry[]>([])
-  const [loadingPrev, setLoadingPrev] = useState(false)
+  const { approve_and_export } = useDeck()
+  const switchToDeck = useStore((s) => s.switchToDeck)
+  const upsertLibraryEntry = useStore((s) => s.upsertLibraryEntry)
+  const removeFromLibrary = useStore((s) => s.removeFromLibrary)
+  const setTab = useStore((s) => s.setTab)
+
   const [loadingFile, setLoadingFile] = useState<string | null>(null)
+  const [remoteSynced, setRemoteSynced] = useState(false)
 
   const isComplete = status === 'completed' || status === 'complete'
-  const isRunning = status && !isComplete && status !== 'failed' && status !== 'rejected'
+  const isRunning = status && !isComplete && status !== 'failed' &&
+                    status !== 'cancelled' && status !== 'rejected'
   const slides = envelope?.deck?.slides ?? []
   const deck = envelope?.deck
 
-  // Load previous exports when there's no active deck
+  // ── Sync remote exports into the library (once per mount) ─────────────────
   useEffect(() => {
-    if (isComplete && envelope) return  // already have a deck
-    setLoadingPrev(true)
-    listAllExports()
-      .then(res => setPrevRuns(res.exports ?? []))
-      .catch(() => setPrevRuns([]))
-      .finally(() => setLoadingPrev(false))
-  }, [isComplete, envelope])
+    if (remoteSynced) return
+    setRemoteSynced(true)
 
-  const handleLoadExport = async (entry: ExportEntry) => {
-    setLoadingFile(entry.filename)
+    listAllExports()
+      .then(({ exports }) => {
+        const remoteIds = new Set(exports.map((e) => e.session_id).filter(Boolean))
+        const localIds  = new Set(library.map((e) => e.sessionId))
+
+        // Only fetch exports not already in local library
+        const missing = exports.filter(
+          (e) => e.session_id && !localIds.has(e.session_id),
+        )
+
+        missing.forEach(async (entry) => {
+          try {
+            const { envelope: env, sessionId: sid } = await loadExport(entry.filename)
+            upsertLibraryEntry({
+              sessionId: sid,
+              title: entry.title,
+              deckType: entry.deck_type,
+              status: 'completed',
+              envelope: env,
+              totalSlides: entry.total_slides,
+              appendixSlides: entry.appendix_slides,
+              createdAt: entry.saved_at,
+              exportedAt: entry.saved_at,
+            })
+          } catch { /* skip unreadable files */ }
+        })
+
+        // Remove local entries whose remote file has been deleted
+        library
+          .filter((e) => e.exportedAt && !remoteIds.has(e.sessionId))
+          .forEach((e) => removeFromLibrary(e.sessionId))
+      })
+      .catch(() => { /* offline or no exports yet — fine */ })
+  }, [])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleLoadEntry = async (entry: DeckLibraryEntry) => {
+    if (entry.sessionId === sessionId) return  // already active
+    setLoadingFile(entry.sessionId)
     try {
-      const { envelope: loaded, sessionId } = await loadExport(entry.filename)
-      // Restore as a completed session — no polling, status already completed
-      setCompletedSession(sessionId, loaded)
-    } catch (err) {
-      console.error('[GalleryPage] loadExport error:', err)
+      // Try to (re-)register the session on the backend so Export works
+      const { restoreSession } = await import('@/api/client')
+      const restored = await restoreSession({
+        session_id: entry.sessionId,
+        ...JSON.parse(JSON.stringify(entry.envelope)),
+      })
+      switchToDeck({ ...entry, sessionId: restored.session_id })
+    } catch {
+      // Backend unreachable — switch locally anyway (approve_and_export will recover)
+      switchToDeck(entry)
     } finally {
       setLoadingFile(null)
     }
   }
 
   const formatDate = (iso: string) => {
-    try { return new Date(iso).toLocaleString() } catch { return iso }
+    try { return new Date(iso).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' }) }
+    catch { return iso }
   }
 
-  // ── State: pipeline running ─────────────────────────────────────────────
-  if (isRunning && !envelope) {
-    return (
-      <div className="max-w-2xl mx-auto px-4 py-12 text-center">
-        <AgentStatusBadge
-          status={status}
-          stage={currentStage}
-          progressPct={progressPct}
-          error={error}
-        />
-      </div>
-    )
-  }
+  // ── Layout ────────────────────────────────────────────────────────────────
+  return (
+    <div className="flex h-full overflow-hidden">
 
-  // ── State: no active deck — show previous runs ──────────────────────────
-  if (!isComplete || !envelope) {
-    return (
-      <div className="max-w-3xl mx-auto px-4 py-12">
-        <div className="text-center mb-8">
-          <div className="text-4xl mb-3">🗂️</div>
-          <h2 className="text-lg font-semibold text-gray-700 mb-1">No active deck</h2>
-          <p className="text-sm text-gray-400">
-            Start a new deck from the Intake tab, or reload a previous run below.
-          </p>
+      {/* ── LEFT: Deck library ──────────────────────────────────────────── */}
+      <div className="w-72 shrink-0 border-r border-gray-200 flex flex-col bg-gray-50 overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-200 bg-white flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-gray-700">
+            My Decks
+            {library.length > 0 && (
+              <span className="ml-1.5 text-xs text-gray-400 font-normal">({library.length})</span>
+            )}
+          </h2>
+          <button
+            onClick={() => setTab('intake')}
+            className="text-xs font-semibold text-brand-600 hover:text-brand-700 flex items-center gap-1"
+            title="Generate a new deck"
+          >
+            + New
+          </button>
         </div>
 
-        {loadingPrev ? (
-          <p className="text-center text-sm text-gray-400">Loading previous runs…</p>
-        ) : prevRuns.length === 0 ? (
-          <p className="text-center text-sm text-gray-400 italic">No previous exports found.</p>
-        ) : (
-          <div className="space-y-3">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Previous runs</h3>
-            {prevRuns.map((entry) => (
-              <div
-                key={entry.filename}
-                className="bg-white border border-gray-200 rounded-xl px-5 py-4 flex items-center justify-between gap-4 shadow-sm hover:border-brand-300 transition-colors"
+        <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+          {/* In-progress deck at top (not yet in library) */}
+          {isRunning && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2.5">
+              <p className="text-xs font-semibold text-yellow-700 truncate">Generating…</p>
+              <AgentStatusBadge
+                status={status}
+                stage={currentStage}
+                progressPct={progressPct}
+                error={error}
+                compact
+              />
+            </div>
+          )}
+
+          {/* Library entries */}
+          {library.length === 0 && !isRunning ? (
+            <div className="text-center py-10 px-4">
+              <p className="text-xs text-gray-400">No decks yet.</p>
+              <button
+                onClick={() => setTab('intake')}
+                className="mt-2 text-xs text-brand-600 underline hover:no-underline"
               >
-                <div className="min-w-0">
-                  <p className="font-semibold text-gray-900 truncate">{entry.title}</p>
-                  <div className="flex gap-2 mt-1 flex-wrap">
-                    <span className="text-xs text-gray-400">{entry.deck_type}</span>
-                    <span className="text-xs text-gray-300">·</span>
-                    <span className="text-xs text-gray-400">{entry.total_slides} slides + {entry.appendix_slides} appendix</span>
-                    {entry.saved_at && (
+                Generate your first deck →
+              </button>
+            </div>
+          ) : (
+            library.map((entry) => {
+              const isActive = entry.sessionId === sessionId
+              const isLoading = loadingFile === entry.sessionId
+              return (
+                <button
+                  key={entry.sessionId}
+                  onClick={() => handleLoadEntry(entry)}
+                  disabled={isLoading}
+                  className={[
+                    'w-full text-left rounded-lg px-3 py-2.5 transition-colors border',
+                    isActive
+                      ? 'bg-brand-50 border-brand-300 shadow-sm'
+                      : 'bg-white border-gray-200 hover:border-brand-200 hover:bg-brand-50/40',
+                  ].join(' ')}
+                >
+                  <p className={`text-xs font-semibold truncate leading-snug ${isActive ? 'text-brand-700' : 'text-gray-800'}`}>
+                    {isLoading ? '⏳ Loading…' : entry.title}
+                  </p>
+                  <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                    {entry.deckType && (
+                      <span className="text-[10px] text-gray-400">{entry.deckType}</span>
+                    )}
+                    <span className="text-[10px] text-gray-300">·</span>
+                    <span className="text-[10px] text-gray-400">
+                      {entry.totalSlides}+{entry.appendixSlides} slides
+                    </span>
+                    {entry.exportedAt && (
                       <>
-                        <span className="text-xs text-gray-300">·</span>
-                        <span className="text-xs text-gray-400">{formatDate(entry.saved_at)}</span>
+                        <span className="text-[10px] text-gray-300">·</span>
+                        <span className="text-[10px] text-green-600">✓ exported</span>
                       </>
                     )}
                   </div>
-                </div>
-                <button
-                  onClick={() => handleLoadExport(entry)}
-                  disabled={loadingFile === entry.filename}
-                  className="shrink-0 px-4 py-1.5 bg-brand-600 hover:bg-brand-700 text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-50"
-                >
-                  {loadingFile === entry.filename ? '⏳ Loading…' : 'Load'}
+                  <p className="text-[10px] text-gray-400 mt-0.5">
+                    {formatDate(entry.createdAt)}
+                  </p>
                 </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  // ── State: deck loaded — show slide gallery + editor ────────────────────
-  return (
-    <div className="flex h-full">
-      {/* ── Left: slide list ── */}
-      <div className="w-96 shrink-0 border-r border-gray-200 overflow-y-auto bg-gray-50">
-        {deck && (
-          <div className="px-4 py-4 border-b border-gray-200 bg-white">
-            <h2 className="font-bold text-gray-900 text-base leading-snug">{deck.title}</h2>
-            <div className="flex gap-2 mt-1.5 flex-wrap">
-              <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded">
-                {deck.type}
-              </span>
-              <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded">
-                {deck.total_slides} slides
-              </span>
-              <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded">
-                {deck.tone}
-              </span>
-            </div>
-            <button
-              onClick={approve_and_export}
-              className="mt-3 w-full py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-xl transition-colors flex items-center justify-center gap-1.5"
-            >
-              ✓ Approve &amp; Export
-            </button>
-          </div>
-        )}
-
-        <div className="p-4 space-y-3">
-          {slides.length === 0 ? (
-            <div className="text-center py-8 text-gray-400 text-sm">No slides yet</div>
-          ) : (
-            <>
-              {slides.map((slide) => (
-                <SlideCard key={slide.slide_id} slide={slide} />
-              ))}
-              <AppendixSection />
-            </>
+              )
+            })
           )}
         </div>
       </div>
 
-      {/* ── Right: slide editor ── */}
-      <div className="flex-1 min-w-0 overflow-hidden">
-        {selectedSlideId ? (
-          <SlideEditor />
+      {/* ── RIGHT: Active deck ───────────────────────────────────────────── */}
+      <div className="flex-1 min-w-0 flex overflow-hidden">
+        {/* No active deck */}
+        {!isComplete || !envelope ? (
+          <div className="flex-1 flex items-center justify-center text-center px-8">
+            <div>
+              <div className="text-4xl mb-3">🗂️</div>
+              <p className="text-sm font-semibold text-gray-600 mb-1">
+                {library.length > 0 ? 'Select a deck from the sidebar' : 'No decks yet'}
+              </p>
+              <p className="text-xs text-gray-400">
+                {library.length > 0
+                  ? 'Click any deck on the left to review it.'
+                  : 'Go to the Intake tab to generate your first deck.'}
+              </p>
+            </div>
+          </div>
         ) : (
-          <div className="h-full flex items-center justify-center text-gray-400 text-sm">
-            <div className="text-center">
-              <div className="text-4xl mb-3">←</div>
-              <p>Select a slide to edit</p>
+          <div className="flex flex-1 min-w-0 overflow-hidden">
+            {/* Slide list */}
+            <div className="w-80 shrink-0 border-r border-gray-200 overflow-y-auto bg-gray-50">
+              {deck && (
+                <div className="px-4 py-3 border-b border-gray-200 bg-white sticky top-0 z-10">
+                  <h2 className="font-bold text-gray-900 text-sm leading-snug">{deck.title}</h2>
+                  <div className="flex gap-1.5 mt-1.5 flex-wrap">
+                    <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded">{deck.type}</span>
+                    <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded">{deck.total_slides} slides</span>
+                  </div>
+                  <button
+                    onClick={approve_and_export}
+                    className="mt-2.5 w-full py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-semibold rounded-lg transition-colors"
+                  >
+                    ✓ Approve &amp; Export
+                  </button>
+                </div>
+              )}
+              <div className="p-3 space-y-3">
+                {slides.map((slide) => (
+                  <SlideCard key={slide.slide_id} slide={slide} />
+                ))}
+                <AppendixSection />
+              </div>
+            </div>
+
+            {/* Editor */}
+            <div className="flex-1 min-w-0 overflow-hidden">
+              {selectedSlideId ? (
+                <SlideEditor />
+              ) : (
+                <div className="h-full flex items-center justify-center text-gray-400 text-sm">
+                  <div className="text-center">
+                    <div className="text-3xl mb-2">←</div>
+                    <p>Select a slide to edit</p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
