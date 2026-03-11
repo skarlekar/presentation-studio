@@ -28,6 +28,13 @@ function getStepStatus(steps: AgentStep[], name: string): AgentStep['status'] {
   return step?.status ?? 'pending'
 }
 
+/** Returns true when quality_validator completed but found schema violations. */
+function isValidationFailed(step: AgentStep | undefined): boolean {
+  if (!step || step.status !== 'completed') return false
+  const s = step.output_summary ?? ''
+  return s.includes('violation') || s.includes('⚠️') || s.toLowerCase().includes('failed')
+}
+
 function getElapsedTime(step: AgentStep | undefined): string | null {
   if (!step?.started_at) return null
   const start = new Date(step.started_at).getTime()
@@ -39,7 +46,9 @@ function getElapsedTime(step: AgentStep | undefined): string | null {
   return `${minutes}m ${secs}s`
 }
 
-const STATUS_STYLES: Record<AgentStep['status'], {
+type VisualStatus = AgentStep['status'] | 'validation_failed' | 'regenerating'
+
+const STATUS_STYLES: Record<VisualStatus, {
   border: string
   bg: string
   text: string
@@ -79,13 +88,33 @@ const STATUS_STYLES: Record<AgentStep['status'], {
     pillText: 'text-red-700',
     animate: false,
   },
+  // Quality validator ran and found violations — pipeline will re-run slide_generator
+  validation_failed: {
+    border: 'border-orange-400',
+    bg: 'bg-orange-50',
+    text: 'text-orange-700',
+    pill: 'bg-orange-100',
+    pillText: 'text-orange-700',
+    animate: false,
+  },
+  // slide_generator is running again after a validation failure
+  regenerating: {
+    border: 'border-amber-400',
+    bg: 'bg-amber-50',
+    text: 'text-amber-700',
+    pill: 'bg-amber-100',
+    pillText: 'text-amber-700',
+    animate: true,
+  },
 }
 
-const PILL_LABELS: Record<AgentStep['status'], string> = {
+const PILL_LABELS: Record<VisualStatus, string> = {
   pending: 'Pending',
   running: 'Running…',
   completed: 'Done',
   failed: 'Failed',
+  validation_failed: 'Violations Found',
+  regenerating: 'Regenerating…',
 }
 
 export default function PipelineProgress() {
@@ -110,17 +139,28 @@ export default function PipelineProgress() {
       {/* Pipeline visualization */}
       <div className="flex items-stretch gap-1 overflow-x-auto pb-2">
         {PIPELINE_NODES.map((node, idx) => {
-          const status = getStepStatus(agentSteps, node.name)
-          const style = STATUS_STYLES[status]
+          const rawStatus = getStepStatus(agentSteps, node.name)
           const step = agentSteps.find((s) => s.name === node.name)
+          const qvStep = agentSteps.find((s) => s.name === 'quality_validator')
+          const inQualityLoop = isValidationFailed(qvStep)
+
+          // Determine visual status — may differ from raw status during quality loop
+          let visualStatus: VisualStatus = rawStatus
+          if (node.name === 'quality_validator' && inQualityLoop) {
+            visualStatus = 'validation_failed'
+          } else if (node.name === 'slide_generator' && rawStatus === 'running' && inQualityLoop) {
+            visualStatus = 'regenerating'
+          }
+
+          const style = STATUS_STYLES[visualStatus]
           const elapsed = getElapsedTime(step)
-          const isClickable = status === 'completed'
+          const isClickable = rawStatus === 'completed'
 
           return (
             <div key={node.name} className="flex items-center">
               {/* Node card */}
               <button
-                onClick={() => handleNodeClick(node.name, status)}
+                onClick={() => handleNodeClick(node.name, rawStatus)}
                 disabled={!isClickable}
                 className={`
                   relative flex flex-col items-center justify-between
@@ -150,7 +190,7 @@ export default function PipelineProgress() {
                   mt-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold
                   ${style.pill} ${style.pillText}
                 `}>
-                  {PILL_LABELS[status]}
+                  {PILL_LABELS[visualStatus]}
                 </span>
 
                 {/* Click hint for completed */}
@@ -181,16 +221,45 @@ export default function PipelineProgress() {
         })}
       </div>
 
-      {/* Running agent detail */}
-      {agentSteps.some((s) => s.status === 'running') && (
-        <div className="mt-3 flex items-center gap-2 text-sm text-blue-600">
-          <span className="animate-spin text-base">⏳</span>
-          <span className="font-medium">
-            {PIPELINE_NODES.find((n) => getStepStatus(agentSteps, n.name) === 'running')?.label ?? 'Processing'}
-            …
-          </span>
-        </div>
-      )}
+      {/* Contextual status footer */}
+      {(() => {
+        const qvStep = agentSteps.find((s) => s.name === 'quality_validator')
+        const sgStep = agentSteps.find((s) => s.name === 'slide_generator')
+        const inQualityLoop = isValidationFailed(qvStep) && sgStep?.status === 'running'
+        const anyRunning = agentSteps.some((s) => s.status === 'running')
+        const runningNode = PIPELINE_NODES.find((n) => getStepStatus(agentSteps, n.name) === 'running')
+
+        if (inQualityLoop) {
+          // Extract violation count from summary if available
+          const violations = qvStep?.output_summary?.match(/\d+(?= violation)/) ?? null
+          return (
+            <div className="mt-3 space-y-1.5">
+              <div className="flex items-start gap-2 rounded-lg bg-orange-50 border border-orange-200 px-3 py-2">
+                <span className="text-base shrink-0">⚠️</span>
+                <div>
+                  <p className="text-sm font-semibold text-orange-800">
+                    Validation failed{violations ? ` — ${violations} violation${parseInt(violations[0]) !== 1 ? 's' : ''} found` : ''}
+                  </p>
+                  <p className="text-xs text-orange-700 mt-0.5">
+                    Slides are being regenerated to address the issues. The pipeline will re-validate automatically.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )
+        }
+
+        if (anyRunning && runningNode) {
+          return (
+            <div className="mt-3 flex items-center gap-2 text-sm text-blue-600">
+              <span className="animate-spin text-base">⏳</span>
+              <span className="font-medium">{runningNode.label}…</span>
+            </div>
+          )
+        }
+
+        return null
+      })()}
     </div>
   )
 }
