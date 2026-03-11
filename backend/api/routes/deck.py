@@ -98,6 +98,17 @@ def _session_to_status_response(session: Session) -> SessionStatusResponse:
         slides_generated = len(session.deck.deck.slides)
         total_slides = session.deck.deck.total_slides
 
+    # Strip output_full from agent_steps for the status response (keep it lightweight)
+    lightweight_steps = []
+    for step in getattr(session, "agent_steps", []):
+        lightweight_steps.append({
+            "name": step.get("name"),
+            "status": step.get("status"),
+            "started_at": step.get("started_at"),
+            "completed_at": step.get("completed_at"),
+            "output_summary": step.get("output_summary"),
+        })
+
     return SessionStatusResponse(
         session_id=session.session_id,
         status=session.status,
@@ -106,6 +117,7 @@ def _session_to_status_response(session: Session) -> SessionStatusResponse:
         total_slides=total_slides,
         active_checkpoint=session.current_checkpoint(),
         error=session.error,
+        agent_steps=lightweight_steps,
         created_at=session.created_at.isoformat(),
         updated_at=session.updated_at.isoformat(),
     )
@@ -284,19 +296,59 @@ def _extract_deck_from_result(result: Any, session_id: str = "") -> Optional[Dec
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-async def run_pipeline(session_id: str, request: DeckRequest) -> None:
-    """Run the DeepAgents pipeline in the background.
+def _process_stream_events(events: list, session_id: str, session_svc_sync_steps: list) -> None:
+    """Process streaming events to detect agent start/complete (runs in thread).
 
-    This coroutine is invoked via FastAPI BackgroundTasks. It drives the
-    orchestrator forward, creating HITL checkpoints when the graph interrupts,
-    and setting the final deck on completion.
+    Appends dicts like {"action": "start"|"complete", "name": ..., "output": ...}
+    to session_svc_sync_steps for the async caller to apply.
+    """
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        for _node_name, state_update in event.items():
+            if not isinstance(state_update, dict):
+                continue
+            messages = state_update.get("messages", [])
+            if not isinstance(messages, list):
+                continue
+            for msg in messages:
+                # AIMessage with tool_calls → subagent starting
+                tool_calls = getattr(msg, "tool_calls", None)
+                if tool_calls:
+                    for tc in tool_calls:
+                        if isinstance(tc, dict) and tc.get("name") == "task":
+                            agent_name = tc.get("args", {}).get("subagent_type", "")
+                            if agent_name:
+                                session_svc_sync_steps.append({
+                                    "action": "start",
+                                    "name": agent_name,
+                                })
+                # ToolMessage → previous subagent completed
+                msg_type = getattr(msg, "type", None)
+                if msg_type == "tool":
+                    content = getattr(msg, "content", "")
+                    if isinstance(content, list):
+                        content = " ".join(
+                            b.get("text", "") if isinstance(b, dict) else str(b)
+                            for b in content
+                        )
+                    session_svc_sync_steps.append({
+                        "action": "complete",
+                        "output": str(content)[:5000] if content else None,
+                    })
+
+
+async def run_pipeline(session_id: str, request: DeckRequest) -> None:
+    """Run the DeepAgents pipeline in the background with per-agent progress tracking.
+
+    Uses orchestrator.stream() with stream_mode="updates" to capture per-agent
+    start/complete events and update the session's agent_steps in real time.
 
     Args:
         session_id: The session to update throughout the run.
         request: The validated DeckRequest driving this pipeline run.
     """
     config = {"configurable": {"thread_id": session_id}}
-    # Pass user-supplied API key (used when ANTHROPIC_API_KEY not in env)
     orchestrator = get_orchestrator(api_key=request.api_key)
     session_svc = get_session_service()
 
@@ -306,18 +358,50 @@ async def run_pipeline(session_id: str, request: DeckRequest) -> None:
 
         input_msg = format_deck_request_message(request)
 
-        # Run the orchestrator synchronously in a thread to avoid blocking the event loop
-        result = await asyncio.to_thread(
-            orchestrator.invoke,
-            {"messages": [{"role": "user", "content": input_msg}]},
-            config,
-        )
+        # Stream events from the orchestrator to track per-agent progress
+        # Collect events in a thread, then process them
+        sync_steps: list[dict] = []
+
+        def _run_stream():
+            events = list(orchestrator.stream(
+                {"messages": [{"role": "user", "content": input_msg}]},
+                config,
+                stream_mode="updates",
+            ))
+            _process_stream_events(events, session_id, sync_steps)
+            return events
+
+        _events = await asyncio.to_thread(_run_stream)
+
+        # Apply agent step updates from the collected sync_steps
+        current_running_agent = None
+        for step_action in sync_steps:
+            if step_action["action"] == "start":
+                agent_name = step_action["name"]
+                # If there's a previously running agent with no explicit complete, complete it
+                if current_running_agent and current_running_agent != agent_name:
+                    await session_svc.complete_agent_step(session_id, current_running_agent)
+                await session_svc.start_agent_step(session_id, agent_name)
+                current_running_agent = agent_name
+                # Also update current_stage for the progress bar
+                await session_svc.update_status(
+                    session_id, PipelineStatus.RUNNING, current_stage=agent_name
+                )
+            elif step_action["action"] == "complete":
+                if current_running_agent:
+                    await session_svc.complete_agent_step(
+                        session_id, current_running_agent, output_full=step_action.get("output")
+                    )
+                    current_running_agent = None
+
+        # Complete any still-running agent
+        if current_running_agent:
+            await session_svc.complete_agent_step(session_id, current_running_agent)
 
         # Check whether the pipeline paused at a HITL checkpoint
         state = await asyncio.to_thread(orchestrator.get_state, config)
 
         if getattr(state, "next", None):
-            # Pipeline interrupted — surface a HITL checkpoint
             stage = _extract_stage_from_state(state)
             pending_input = _extract_pending_input(state)
             await session_svc.add_checkpoint(session_id, stage, pending_input)
@@ -327,8 +411,11 @@ async def run_pipeline(session_id: str, request: DeckRequest) -> None:
                 session_id,
             )
         else:
-            # Pipeline completed — extract and store the deck
-            deck = _extract_deck_from_result(result, session_id)
+            # Pipeline completed — extract deck from final state
+            result = await asyncio.to_thread(orchestrator.get_state, config)
+            # get_state returns a StateSnapshot; extract messages from its values
+            result_values = getattr(result, "values", {})
+            deck = _extract_deck_from_result(result_values, session_id)
             if deck:
                 await session_svc.set_deck(session_id, deck)
                 logger.info("Pipeline completed for session %s", session_id)
@@ -342,6 +429,12 @@ async def run_pipeline(session_id: str, request: DeckRequest) -> None:
 
     except Exception as exc:
         logger.exception("Pipeline error for session %s: %s", session_id, exc)
+        # Mark any running agent step as failed
+        session = await session_svc.get_session(session_id)
+        if session:
+            for step in session.agent_steps:
+                if step["status"] == "running":
+                    await session_svc.fail_agent_step(session_id, step["name"], error=str(exc))
         await session_svc.update_status(
             session_id,
             PipelineStatus.FAILED,
@@ -374,12 +467,41 @@ async def resume_pipeline(session_id: str) -> None:
         await session_svc.update_status(session_id, PipelineStatus.RUNNING)
         logger.info("Resuming pipeline for session %s", session_id)
 
-        # Resume from the last checkpoint by passing None
-        result = await asyncio.to_thread(
-            orchestrator.invoke,
-            None,
-            config,
-        )
+        # Stream events for resume too
+        sync_steps: list[dict] = []
+
+        def _run_resume_stream():
+            events = list(orchestrator.stream(
+                None,
+                config,
+                stream_mode="updates",
+            ))
+            _process_stream_events(events, session_id, sync_steps)
+            return events
+
+        _events = await asyncio.to_thread(_run_resume_stream)
+
+        # Apply agent step updates
+        current_running_agent = None
+        for step_action in sync_steps:
+            if step_action["action"] == "start":
+                agent_name = step_action["name"]
+                if current_running_agent and current_running_agent != agent_name:
+                    await session_svc.complete_agent_step(session_id, current_running_agent)
+                await session_svc.start_agent_step(session_id, agent_name)
+                current_running_agent = agent_name
+                await session_svc.update_status(
+                    session_id, PipelineStatus.RUNNING, current_stage=agent_name
+                )
+            elif step_action["action"] == "complete":
+                if current_running_agent:
+                    await session_svc.complete_agent_step(
+                        session_id, current_running_agent, output_full=step_action.get("output")
+                    )
+                    current_running_agent = None
+
+        if current_running_agent:
+            await session_svc.complete_agent_step(session_id, current_running_agent)
 
         state = await asyncio.to_thread(orchestrator.get_state, config)
 
@@ -393,7 +515,9 @@ async def resume_pipeline(session_id: str) -> None:
                 session_id,
             )
         else:
-            deck = _extract_deck_from_result(result, session_id)
+            result = await asyncio.to_thread(orchestrator.get_state, config)
+            result_values = getattr(result, "values", {})
+            deck = _extract_deck_from_result(result_values, session_id)
             if deck:
                 await session_svc.set_deck(session_id, deck)
                 logger.info("Pipeline completed for session %s", session_id)
@@ -406,6 +530,11 @@ async def resume_pipeline(session_id: str) -> None:
 
     except Exception as exc:
         logger.exception("Pipeline resume error for session %s: %s", session_id, exc)
+        session = await session_svc.get_session(session_id)
+        if session:
+            for step in session.agent_steps:
+                if step["status"] == "running":
+                    await session_svc.fail_agent_step(session_id, step["name"], error=str(exc))
         await session_svc.update_status(
             session_id,
             PipelineStatus.FAILED,
@@ -534,6 +663,94 @@ async def get_session_status(session_id: str) -> SessionStatusResponse:
     if not session:
         raise _session_not_found(session_id)
     return _session_to_status_response(session)
+
+
+@router.get(
+    "/{session_id}/agents",
+    summary="Get agent pipeline steps",
+)
+async def get_agent_steps(session_id: str) -> dict:
+    """Return per-agent progress steps for a session.
+
+    Returns the full agent_steps list including output_full for completed agents.
+    """
+    session_svc = get_session_service()
+    session = await session_svc.get_session(session_id)
+    if not session:
+        raise _session_not_found(session_id)
+
+    return {
+        "session_id": session_id,
+        "agent_steps": getattr(session, "agent_steps", []),
+    }
+
+
+@router.get(
+    "/{session_id}/agents/{agent_name}",
+    summary="Get single agent output",
+)
+async def get_agent_output(session_id: str, agent_name: str) -> JSONResponse:
+    """Return the full output of a specific completed agent step.
+
+    Returns HTML-formatted output suitable for viewing in a new browser tab.
+    """
+    session_svc = get_session_service()
+    session = await session_svc.get_session(session_id)
+    if not session:
+        raise _session_not_found(session_id)
+
+    AGENT_LABELS = {
+        "insight_extractor": "Insight Extraction",
+        "deck_architect": "Deck Architecture",
+        "slide_generator": "Slide Generation",
+        "appendix_builder": "Appendix Builder",
+        "quality_validator": "Quality Check",
+    }
+
+    for step in getattr(session, "agent_steps", []):
+        if step["name"] == agent_name:
+            label = AGENT_LABELS.get(agent_name, agent_name)
+            output = step.get("output_full") or "No output captured."
+            # Return as HTML for viewing in a new tab
+            html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{label} — DeckStudio Agent Output</title>
+<style>
+body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+       max-width: 900px; margin: 2rem auto; padding: 0 1.5rem; background: #f8fafc; color: #1e293b; }}
+h1 {{ color: #4f46e5; border-bottom: 2px solid #e2e8f0; padding-bottom: 0.5rem; }}
+.meta {{ color: #64748b; font-size: 0.875rem; margin-bottom: 1.5rem; }}
+.status {{ display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px;
+           font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }}
+.status-completed {{ background: #dcfce7; color: #166534; }}
+.status-failed {{ background: #fee2e2; color: #991b1b; }}
+.status-running {{ background: #dbeafe; color: #1e40af; }}
+pre {{ background: #1e293b; color: #e2e8f0; padding: 1.5rem; border-radius: 0.75rem;
+       overflow-x: auto; white-space: pre-wrap; word-wrap: break-word; font-size: 0.85rem;
+       line-height: 1.6; }}
+</style>
+</head>
+<body>
+<h1>🔬 {label}</h1>
+<div class="meta">
+  <span class="status status-{step.get('status', 'completed')}">{step.get('status', 'unknown')}</span>
+  &nbsp; Agent: <code>{agent_name}</code>
+  {f' &nbsp; Started: {step.get("started_at", "—")}' if step.get("started_at") else ''}
+  {f' &nbsp; Completed: {step.get("completed_at", "—")}' if step.get("completed_at") else ''}
+</div>
+<pre>{output}</pre>
+</body>
+</html>"""
+            from fastapi.responses import HTMLResponse
+            return HTMLResponse(content=html)
+
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"Agent '{agent_name}' not found in session '{session_id}'.",
+    )
 
 
 @router.post(

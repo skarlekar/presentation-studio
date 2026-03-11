@@ -146,6 +146,18 @@ export interface Checkpoint {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Agent Steps (pipeline progress tracking)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface AgentStep {
+  name: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  started_at: string | null
+  completed_at: string | null
+  output_summary: string | null
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Session status
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -159,6 +171,7 @@ export interface SessionStatusResponse {
   checkpoint?: Checkpoint | null
   active_checkpoint?: Checkpoint | null
   error?: string | null
+  agent_steps?: AgentStep[]
   created_at: string
   updated_at: string
 }

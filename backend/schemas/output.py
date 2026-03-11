@@ -608,6 +608,11 @@ class SessionStatusResponse(BaseModel):
         description="Error detail when status == FAILED.",
     )
 
+    agent_steps: list[dict] = Field(
+        default_factory=list,
+        description="Per-agent progress steps with status tracking.",
+    )
+
     created_at: str = Field(..., description="ISO-8601 UTC session start time.")
 
     updated_at: str = Field(..., description="ISO-8601 UTC last status update time.")

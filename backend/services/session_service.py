@@ -57,6 +57,8 @@ class Session:
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
     request_data: Optional[dict] = None
+    agent_steps: list = field(default_factory=list)
+    # Each entry: {name, status, started_at, completed_at, output_summary, output_full}
 
     def progress_pct(self) -> int:
         """Return estimated pipeline completion percentage (0-100)."""
@@ -207,6 +209,63 @@ class SessionService:
                 session.updated_at = datetime.utcnow()
                 return session.quality_retry_count
             return 0
+
+    async def start_agent_step(self, session_id: str, agent_name: str) -> None:
+        """Record the start of a subagent step."""
+        async with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return
+            # Don't add duplicate if already running/completed
+            for step in session.agent_steps:
+                if step["name"] == agent_name and step["status"] in ("running", "completed"):
+                    return
+            session.agent_steps.append({
+                "name": agent_name,
+                "status": "running",
+                "started_at": datetime.utcnow().isoformat(),
+                "completed_at": None,
+                "output_summary": None,
+                "output_full": None,
+            })
+            session.updated_at = datetime.utcnow()
+
+    async def complete_agent_step(
+        self, session_id: str, agent_name: str, output_full: Optional[str] = None
+    ) -> None:
+        """Mark a subagent step as completed."""
+        async with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return
+            for step in session.agent_steps:
+                if step["name"] == agent_name and step["status"] == "running":
+                    step["status"] = "completed"
+                    step["completed_at"] = datetime.utcnow().isoformat()
+                    if output_full:
+                        # Store full output, truncate summary
+                        step["output_full"] = output_full
+                        step["output_summary"] = (output_full[:200] + "…") if len(output_full) > 200 else output_full
+                    break
+            session.updated_at = datetime.utcnow()
+
+    async def fail_agent_step(
+        self, session_id: str, agent_name: str, error: Optional[str] = None
+    ) -> None:
+        """Mark a subagent step as failed."""
+        async with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return
+            for step in session.agent_steps:
+                if step["name"] == agent_name and step["status"] == "running":
+                    step["status"] = "failed"
+                    step["completed_at"] = datetime.utcnow().isoformat()
+                    if error:
+                        step["output_full"] = error
+                        step["output_summary"] = error[:200]
+                    break
+            session.updated_at = datetime.utcnow()
 
     async def cleanup_expired(self) -> int:
         """Remove sessions older than SESSION_TTL_MINUTES.

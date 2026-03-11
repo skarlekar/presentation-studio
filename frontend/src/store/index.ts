@@ -9,6 +9,7 @@
 
 import { create } from 'zustand'
 import type {
+  AgentStep,
   DeckRequest,
   DeckEnvelope,
   SessionStatusResponse,
@@ -31,6 +32,7 @@ interface SessionSlice {
   error: string | null
   isPolling: boolean
   lastRequest: DeckRequest | null
+  agentSteps: AgentStep[]
 }
 
 interface DeckSlice {
@@ -68,6 +70,7 @@ interface Actions {
   updateFromStatus: (status: SessionStatusResponse) => void
   setPolling: (polling: boolean) => void
   setEnvelope: (envelope: DeckEnvelope) => void
+  setAgentSteps: (steps: AgentStep[]) => void
   resetSession: () => void
 
   // Deck / slide editing
@@ -110,6 +113,7 @@ const initialSessionSlice: SessionSlice = {
   error: null,
   isPolling: false,
   lastRequest: null,
+  agentSteps: [],
 }
 
 const initialDeckSlice: DeckSlice = {
@@ -150,6 +154,7 @@ export const useStore = create<SessionSlice & DeckSlice & UiSlice & ApiKeySlice 
       editingSlideId: null,
       exportResult: null,
       activeTab: 'intake',
+      agentSteps: [],
     }),
 
   updateFromStatus: (statusResp) => {
@@ -159,14 +164,21 @@ export const useStore = create<SessionSlice & DeckSlice & UiSlice & ApiKeySlice 
       checkpoint !== null &&
       !get().checkpointModalOpen
 
-    set({
+    const updates: Partial<SessionSlice & UiSlice> = {
       status: statusResp.status as PipelineStatus,
       currentStage: statusResp.current_stage ?? null,
       progressPct: statusResp.progress_pct ?? 0,
       checkpoint,
       error: statusResp.error ?? null,
       checkpointModalOpen: shouldOpenModal ? true : get().checkpointModalOpen,
-    })
+    }
+
+    // Update agent steps from status response if present
+    if (statusResp.agent_steps && statusResp.agent_steps.length > 0) {
+      updates.agentSteps = statusResp.agent_steps
+    }
+
+    set(updates)
 
     // Auto-switch to Gallery tab when deck is complete
     if (
@@ -187,6 +199,8 @@ export const useStore = create<SessionSlice & DeckSlice & UiSlice & ApiKeySlice 
       activeTab: 'gallery',
     }),
 
+  setAgentSteps: (steps) => set({ agentSteps: steps }),
+
   resetSession: () =>
     set({
       ...initialSessionSlice,
@@ -194,6 +208,7 @@ export const useStore = create<SessionSlice & DeckSlice & UiSlice & ApiKeySlice 
       activeTab: 'intake',
       exportResult: null,
       checkpointModalOpen: false,
+      agentSteps: [],
     }),
 
   // ── Deck / slide editing actions ───────────────────────────────────────────

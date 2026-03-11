@@ -7,6 +7,7 @@ import { useStore } from '@/store'
 import { useShallow } from 'zustand/react/shallow'
 import { useDeck } from '@/hooks/useDeck'
 import AgentStatusBadge from '@/components/AgentStatusBadge'
+import PipelineProgress from '@/components/PipelineProgress'
 import { fetchUrl, ApiError } from '@/api/client'
 import type { DeckRequest, DeckType, DecisionInformAsk } from '@/types'
 
@@ -22,7 +23,7 @@ const DIA_OPTIONS: DecisionInformAsk[] = ['Decision', 'Inform', 'Ask']
 
 const DEFAULT_FORM: DeckRequest = {
   context: '',
-  number_of_slides: 11,
+  number_of_slides: 5,
   audience: '',
   deck_type: 'Decision Deck',
   decision_inform_ask: 'Decision',
@@ -106,12 +107,24 @@ export default function IntakePage() {
       {/* Status banner */}
       {status && (
         <div className="mb-6">
-          <AgentStatusBadge
-            status={status}
-            stage={currentStage}
-            progressPct={progressPct}
-            error={error}
-          />
+          {isRunning ? (
+            <div className="space-y-3">
+              <AgentStatusBadge
+                status={status}
+                stage={currentStage}
+                progressPct={progressPct}
+                error={error}
+              />
+              <PipelineProgress />
+            </div>
+          ) : (
+            <AgentStatusBadge
+              status={status}
+              stage={currentStage}
+              progressPct={progressPct}
+              error={error}
+            />
+          )}
           {isComplete && (
             <p className="text-sm text-green-600 mt-2 font-medium">
               ✓ Deck generated! Switch to the <strong>Gallery</strong> tab to review it.
